@@ -16,6 +16,7 @@ public:
     Q_INVOKABLE QVariantMap layout(int capacity, int freeSlots) const;
     Q_INVOKABLE QUrl suggestedFileUrl(int capacity, int freeSlots) const;
     Q_INVOKABLE QVariantMap saveZip(int capacity, int freeSlots, const QUrl &destination) const;
+    Q_INVOKABLE QVariantMap installMod(int capacity, int freeSlots, const QString &gameProgramPath) const;
 
 private:
     struct Layout {
@@ -24,6 +25,7 @@ private:
         int extra = 0;
         int cols = 0;
         int rows = 0;
+        int visibleRows = 0;
         int unused = 0;
         int cell = 0;
         int width = 0;
@@ -42,4 +44,5 @@ private:
     QJsonObject m_files;
     QJsonObject m_baseline;
     QString m_loadError;
+    QVariantList m_loadErrorArgs;
 };

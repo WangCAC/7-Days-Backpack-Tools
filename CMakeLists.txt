@@ -1,10 +1,10 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(BackpackTools VERSION 0.1 LANGUAGES CXX)
+project(BackpackTools VERSION 1.0.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Quick Xml)
+find_package(Qt6 REQUIRED COMPONENTS Quick Xml Concurrent Gui Svg)
 
 qt_standard_project_setup(REQUIRES 6.8)
 
@@ -12,6 +12,10 @@ qt_add_executable(appBackpackTools
     main.cpp
     BackpackGenerator.cpp
     BackpackGenerator.h
+    GameManager.cpp
+    GameManager.h
+    LocalizationManager.cpp
+    LocalizationManager.h
 )
 
 qt_add_resources(appBackpackTools "backpack_templates"
@@ -19,11 +23,23 @@ qt_add_resources(appBackpackTools "backpack_templates"
     FILES backpack_templates.json
 )
 
+qt_add_resources(appBackpackTools "locales"
+    PREFIX "/"
+    FILES locales/zh_CN.json locales/en_US.json
+)
+
+qt_add_resources(appBackpackTools "branding"
+    PREFIX "/"
+    FILES assets/backpack-logo.svg assets/help-circle.svg
+          assets/language-globe.svg assets/chevron-down.svg
+)
+
 qt_add_qml_module(appBackpackTools
     URI BackpackTools
     VERSION 1.0
     QML_FILES
         Main.qml
+        FluentButton.qml
 )
 
 # Qt for iOS sets MACOSX_BUNDLE_GUI_IDENTIFIER automatically since Qt 6.1.
@@ -38,7 +54,7 @@ set_target_properties(appBackpackTools PROPERTIES
 )
 
 target_link_libraries(appBackpackTools
-    PRIVATE Qt6::Quick Qt6::Xml
+    PRIVATE Qt6::Quick Qt6::Xml Qt6::Concurrent Qt6::Gui Qt6::Svg
 )
 
 include(GNUInstallDirs)

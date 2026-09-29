@@ -1,8 +1,10 @@
 #include "BackpackGenerator.h"
 
 #include <QDateTime>
+#include <QDir>
 #include <QDomDocument>
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonParseError>
 #include <QRegularExpression>
@@ -17,6 +19,13 @@ struct ZipEntry {
     QString name;
     QByteArray body;
 };
+
+QVariantMap failure(const QString &key, const QVariantList &arguments = {})
+{
+    return {{QStringLiteral("ok"), false},
+            {QStringLiteral("messageKey"), key},
+            {QStringLiteral("messageArgs"), arguments}};
+}
 
 void append16(QByteArray &bytes, quint16 value)
 {
@@ -129,19 +138,20 @@ BackpackGenerator::BackpackGenerator(QObject *parent) : QObject(parent)
 {
     QFile source(QStringLiteral(":/backpack_templates.json"));
     if (!source.open(QIODevice::ReadOnly)) {
-        m_loadError = QStringLiteral("无法读取内置模组模板。");
+        m_loadError = QStringLiteral("errorTemplateRead");
         return;
     }
     QJsonParseError parseError;
     const QJsonDocument data = QJsonDocument::fromJson(source.readAll(), &parseError);
     if (parseError.error != QJsonParseError::NoError || !data.isObject()) {
-        m_loadError = QStringLiteral("模组模板格式错误：%1").arg(parseError.errorString());
+        m_loadError = QStringLiteral("errorTemplateFormat");
+        m_loadErrorArgs = {parseError.errorString()};
         return;
     }
     m_files = data.object().value(QStringLiteral("files")).toObject();
     m_baseline = data.object().value(QStringLiteral("baseline")).toObject();
     if (m_files.size() != 9)
-        m_loadError = QStringLiteral("内置模组模板不完整。");
+        m_loadError = QStringLiteral("errorTemplateIncomplete");
 }
 
 BackpackGenerator::Layout BackpackGenerator::calculate(int capacity, int freeSlots)
@@ -167,10 +177,15 @@ BackpackGenerator::Layout BackpackGenerator::calculate(int capacity, int freeSlo
 
     result.cell = qRound(73.0 - (result.cols - 8) * 7.0 / 17.0);
     result.width = result.cols * result.cell + qRound(19.0 + (result.cols - 8) * 9.0 / 17.0);
-    result.contentHeight = qMin(result.rows, 10) * result.cell + 11;
-    result.height = result.contentHeight + 46;
     result.interpolation = std::clamp((result.width - 603.0) / (1678.0 - 603.0), 0.0, 1.0);
     result.stackScale = qRound((1.05 + (0.75 - 1.05) * result.interpolation) * 100.0) / 100.0;
+    // Keep the scaled backpack panel within the space available below other game windows.
+    // The grid retains every row; only the scrollview's visible area is shortened.
+    constexpr double maxScaledPanelHeight = 540.0;
+    const int rowsThatFit = qFloor((maxScaledPanelHeight / result.stackScale - 57.0) / result.cell);
+    result.visibleRows = qMin(result.rows, qBound(1, rowsThatFit, 10));
+    result.contentHeight = result.visibleRows * result.cell + 11;
+    result.height = result.contentHeight + 46;
 
     const double fractions[5] = {10.0 / 125.0, 35.0 / 125.0, 70.0 / 125.0,
                                  95.0 / 125.0, 1.0};
@@ -198,6 +213,7 @@ QVariantMap BackpackGenerator::layout(int capacity, int freeSlots) const
             {QStringLiteral("extra"), data.extra},
             {QStringLiteral("cols"), data.cols},
             {QStringLiteral("rows"), data.rows},
+            {QStringLiteral("visibleRows"), data.visibleRows},
             {QStringLiteral("unused"), data.unused},
             {QStringLiteral("cell"), data.cell},
             {QStringLiteral("width"), data.width},
@@ -224,7 +240,7 @@ QString BackpackGenerator::patchXml(const QString &relativePath, const QString &
     int line = 0;
     int column = 0;
     if (!document.setContent(source, &parseMessage, &line, &column)) {
-        *error = QStringLiteral("%1 模板 XML 错误（%2:%3）：%4")
+        *error = QStringLiteral("%1 (%2:%3): %4")
                      .arg(relativePath).arg(line).arg(column).arg(parseMessage);
         return {};
     }
@@ -318,11 +334,11 @@ QString BackpackGenerator::modInfo(const Layout &layout, const QString &folder) 
 QVariantMap BackpackGenerator::saveZip(int capacity, int freeSlots, const QUrl &destination) const
 {
     if (capacity < 1 || capacity > 5000 || freeSlots < 0 || freeSlots > capacity)
-        return {{QStringLiteral("ok"), false}, {QStringLiteral("message"), QStringLiteral("请输入有效的容量和免负重格数。")}};
+        return failure(QStringLiteral("errorInvalidInput"));
     if (!m_loadError.isEmpty())
-        return {{QStringLiteral("ok"), false}, {QStringLiteral("message"), m_loadError}};
+        return failure(m_loadError, m_loadErrorArgs);
     if (!destination.isLocalFile())
-        return {{QStringLiteral("ok"), false}, {QStringLiteral("message"), QStringLiteral("请选择本地保存位置。")}};
+        return failure(QStringLiteral("errorLocalSave"));
 
     const Layout data = calculate(capacity, freeSlots);
     const QString folder = QStringLiteral("wangcac-%1BigBackpack%2WB").arg(capacity).arg(freeSlots);
@@ -332,7 +348,7 @@ QVariantMap BackpackGenerator::saveZip(int capacity, int freeSlots, const QUrl &
         QString error;
         const QString result = patchXml(it.key(), it.value().toString(), data, &error);
         if (!error.isEmpty())
-            return {{QStringLiteral("ok"), false}, {QStringLiteral("message"), error}};
+            return failure(QStringLiteral("errorTemplateXml"), {error});
         entries.append({folder + QStringLiteral("/Config/") + it.key(), result.toUtf8()});
     }
 
@@ -341,9 +357,52 @@ QVariantMap BackpackGenerator::saveZip(int capacity, int freeSlots, const QUrl &
         target += QStringLiteral(".zip");
     QSaveFile file(target);
     if (!file.open(QIODevice::WriteOnly))
-        return {{QStringLiteral("ok"), false}, {QStringLiteral("message"), file.errorString()}};
+        return failure(QStringLiteral("errorFileSave"), {file.errorString()});
     const QByteArray zip = createZip(entries);
     if (file.write(zip) != zip.size() || !file.commit())
-        return {{QStringLiteral("ok"), false}, {QStringLiteral("message"), file.errorString()}};
+        return failure(QStringLiteral("errorFileSave"), {file.errorString()});
     return {{QStringLiteral("ok"), true}, {QStringLiteral("path"), target}};
+}
+
+QVariantMap BackpackGenerator::installMod(int capacity, int freeSlots,
+                                          const QString &gameProgramPath) const
+{
+    if (capacity < 1 || capacity > 5000 || freeSlots < 0 || freeSlots > capacity)
+        return failure(QStringLiteral("errorInvalidInput"));
+    if (!m_loadError.isEmpty())
+        return failure(m_loadError, m_loadErrorArgs);
+
+    const QFileInfo program(gameProgramPath);
+    if (!program.isFile()
+        || program.fileName().compare(QStringLiteral("7DaysToDie.exe"), Qt::CaseInsensitive) != 0)
+        return failure(QStringLiteral("errorChooseGame"));
+
+    const Layout data = calculate(capacity, freeSlots);
+    const QString folder = QStringLiteral("wangcac-%1BigBackpack%2WB").arg(capacity).arg(freeSlots);
+    QList<ZipEntry> files;
+    files.append({QStringLiteral("ModInfo.xml"), modInfo(data, folder).toUtf8()});
+    for (auto it = m_files.constBegin(); it != m_files.constEnd(); ++it) {
+        QString error;
+        const QString result = patchXml(it.key(), it.value().toString(), data, &error);
+        if (!error.isEmpty())
+            return failure(QStringLiteral("errorTemplateXml"), {error});
+        files.append({QStringLiteral("Config/") + it.key(), result.toUtf8()});
+    }
+
+    const QString modDirectory = QDir(program.absolutePath()).filePath(
+        QStringLiteral("Mods/") + folder);
+    if (!QDir().mkpath(modDirectory))
+        return failure(QStringLiteral("errorCreateMods"), {modDirectory});
+
+    for (const ZipEntry &entry : files) {
+        const QString target = QDir(modDirectory).filePath(entry.name);
+        if (!QDir().mkpath(QFileInfo(target).absolutePath()))
+            return failure(QStringLiteral("errorCreateConfig"), {target});
+        QSaveFile output(target);
+        if (!output.open(QIODevice::WriteOnly))
+            return failure(QStringLiteral("errorWriteFile"), {target, output.errorString()});
+        if (output.write(entry.body) != entry.body.size() || !output.commit())
+            return failure(QStringLiteral("errorWriteFile"), {target, output.errorString()});
+    }
+    return {{QStringLiteral("ok"), true}, {QStringLiteral("path"), modDirectory}};
 }
