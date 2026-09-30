@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(BackpackTools VERSION 1.0.0 LANGUAGES CXX)
+project(BackpackTools VERSION 1.0.5 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -17,6 +17,11 @@ qt_add_executable(appBackpackTools
     LocalizationManager.cpp
     LocalizationManager.h
 )
+
+if(WIN32)
+    enable_language(RC)
+    target_sources(appBackpackTools PRIVATE assets/app-icon.rc)
+endif()
 
 qt_add_resources(appBackpackTools "backpack_templates"
     PREFIX "/"

@@ -21,10 +21,13 @@ public:
 private:
     struct Layout {
         int capacity = 0;
+        int baseBagSize = 0;
+        int maxCapacity = 0;
         int freeSlots = 0;
         int extra = 0;
         int cols = 0;
         int rows = 0;
+        int gridRows = 0;
         int visibleRows = 0;
         int unused = 0;
         int cell = 0;
@@ -34,6 +37,7 @@ private:
         double stackScale = 0;
         double interpolation = 0;
         QList<int> perk;
+        QList<int> perkRank;
     };
 
     static Layout calculate(int capacity, int freeSlots);

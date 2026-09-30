@@ -7,7 +7,7 @@
   <h1>7 Days to Die Custom Backpack Capacity Tool</h1>
 
   <p>Set the backpack capacity and starting unencumbered slots to suit your playstyle, preview the result, and generate the mod in one click.</p>
-  <p><strong>v1.0.0</strong> · Windows · Supports 7 Days to Die V3.3 and later</p>
+  <p><strong>v1.0.5</strong> · Windows · Supports 7 Days to Die V3.3 and later</p>
 
   <p>
     <a href="#about-the-project">About</a> ·

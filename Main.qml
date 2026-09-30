@@ -29,11 +29,7 @@ ApplicationWindow {
                                && capacity >= 1 && capacity <= 5000
                                && freeSlots >= 0 && freeSlots <= capacity
     property var currentLayout: inputsValid ? backpackGenerator.layout(capacity, freeSlots) : ({"valid": false})
-    property string statusKey: ""
-    property var statusArgs: []
-    property bool statusIsError: false
-    property string statusMessage: statusKey.length > 0 ? window.tf(statusKey, statusArgs) : ""
-    property bool saveSucceeded: false
+    property bool scanNoticePending: false
 
     function t(key) {
         const value = localization.strings[key]
@@ -45,14 +41,20 @@ ApplicationWindow {
             return args && index < args.length ? String(args[index]) : match
         })
     }
-    function setStatus(key, args, isError) {
-        statusKey = key
-        statusArgs = args || []
-        statusIsError = isError || false
+    function showNotice(message, isError) {
+        noticeDialog.messageText = message
+        noticeDialog.isError = isError || false
+        noticeDialog.open()
     }
     Connections {
-        target: localization
-        function onLanguageChanged() { window.setStatus("", [], false) }
+        target: gameManager
+        function onMessageChanged() {
+            if (!window.scanNoticePending)
+                return
+            window.showNotice(gameManager.message, gameManager.messageIsError)
+            if (!gameManager.scanning)
+                window.scanNoticePending = false
+        }
     }
 
     onCurrentLayoutChanged: { if (previewGrid) previewGrid.positionViewAtBeginning() }
@@ -64,10 +66,9 @@ ApplicationWindow {
         nameFilters: [window.t("zipFilter")]
         onAccepted: {
             const result = backpackGenerator.saveZip(window.capacity, window.freeSlots, selectedFile)
-            window.saveSucceeded = result.ok
-            window.setStatus(result.ok ? "statusSaved" : "statusGenerateFailed",
-                             [result.ok ? result.path : window.tf(result.messageKey, result.messageArgs)],
-                             !result.ok)
+            window.showNotice(window.tf(result.ok ? "statusSaved" : "statusGenerateFailed",
+                                        [result.ok ? result.path : window.tf(result.messageKey, result.messageArgs)]),
+                              !result.ok)
         }
     }
 
@@ -77,8 +78,77 @@ ApplicationWindow {
         fileMode: FileDialog.OpenFile
         nameFilters: [window.t("gameExeFilter")]
         onAccepted: {
-            window.setStatus("", [], false)
+            window.scanNoticePending = false
             gameManager.addGame(selectedFile)
+            window.showNotice(gameManager.message, gameManager.messageIsError)
+        }
+    }
+
+    Dialog {
+        id: noticeDialog
+        property string messageText: ""
+        property bool isError: false
+        anchors.centerIn: Overlay.overlay
+        width: Math.min(460, window.width - 40)
+        height: Math.min(230, window.height - 40)
+        modal: true
+        padding: 0
+        background: Rectangle {
+            radius: 16
+            color: "#f8fbff"
+            border.color: noticeDialog.isError ? "#e6c2c4" : "#cbddeb"
+            layer.enabled: true
+            layer.effect: MultiEffect {
+                shadowEnabled: true
+                shadowColor: "#500c243b"
+                shadowBlur: 0.45
+                shadowVerticalOffset: 6
+            }
+        }
+        header: Rectangle {
+            implicitHeight: 54
+            radius: 16
+            color: noticeDialog.isError ? "#fff1f1" : "#edf6fe"
+            Text {
+                anchors.left: parent.left
+                anchors.leftMargin: 20
+                anchors.verticalCenter: parent.verticalCenter
+                text: window.t(noticeDialog.isError ? "noticeErrorTitle" : "noticeTitle")
+                color: noticeDialog.isError ? "#a3343a" : "#245b87"
+                font.pixelSize: 17
+                font.bold: true
+            }
+        }
+        contentItem: Flickable {
+            clip: true
+            contentWidth: width
+            contentHeight: noticeText.implicitHeight + 32
+            boundsBehavior: Flickable.StopAtBounds
+            ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+            Text {
+                id: noticeText
+                x: 20; y: 16
+                width: parent.width - 40
+                text: noticeDialog.messageText
+                wrapMode: Text.WrapAnywhere
+                color: "#30485f"
+                font.pixelSize: 13
+            }
+        }
+        footer: Rectangle {
+            implicitHeight: 58
+            radius: 16
+            color: "#f8fbff"
+            FluentButton {
+                anchors.right: parent.right
+                anchors.rightMargin: 18
+                anchors.verticalCenter: parent.verticalCenter
+                width: 100; height: 36
+                buttonStyle: "accent"
+                backdropSource: noticeDialog.background
+                text: window.t("aboutClose")
+                onClicked: noticeDialog.close()
+            }
         }
     }
 
@@ -572,16 +642,27 @@ ApplicationWindow {
                                     Repeater {
                                         model: 5
                                         Rectangle {
-                                            Layout.fillWidth: true; Layout.preferredHeight: 49
+                                            Layout.fillWidth: true; Layout.preferredHeight: 58
                                             color: "#edf5fc"; radius: 9
                                             border.color: "#dceaf6"
                                             Column {
                                                 anchors.centerIn: parent; spacing: 2
                                                 Text { anchors.horizontalCenter: parent.horizontalCenter; text: window.tf("levelSuffix", [index + 1]); color: "#718ca7"; font.pixelSize: 10 }
                                                 Text { anchors.horizontalCenter: parent.horizontalCenter; text: currentLayout.valid ? "+" + currentLayout.perk[index] : "—"; color: "#2a6da7"; font.pixelSize: 12; font.bold: true }
+                                                Text { anchors.horizontalCenter: parent.horizontalCenter; text: currentLayout.valid ? window.tf("rankIncrease", [currentLayout.perkRank[index]]) : ""; color: "#718ca7"; font.pixelSize: 9 }
                                             }
                                         }
                                     }
+                                }
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: currentLayout.valid
+                                          ? window.tf("packMuleBreakdown", [currentLayout.configuredPerkTotal,
+                                                                             currentLayout.backpackPerkTotal,
+                                                                             currentLayout.perkTotal]) : ""
+                                    color: "#718ca7"
+                                    font.pixelSize: 10
+                                    wrapMode: Text.Wrap
                                 }
                             }
                             Rectangle {
@@ -661,7 +742,6 @@ ApplicationWindow {
                                     }
                                     Component.onCompleted: syncSelection()
                                     onActivated: {
-                                        window.setStatus("", [], false)
                                         gameManager.selectGame(currentText)
                                     }
                                     contentItem: Text {
@@ -705,7 +785,7 @@ ApplicationWindow {
                                         enabled: !gameManager.scanning
                                         text: gameManager.scanning ? window.t("scanInProgress") : window.t("scanGame")
                                         onClicked: {
-                                            window.setStatus("", [], false)
+                                            window.scanNoticePending = true
                                             gameManager.scanGames()
                                         }
                                     }
@@ -714,18 +794,7 @@ ApplicationWindow {
                             RowLayout {
                                 Layout.fillWidth: true
                                 spacing: 8
-                                Text {
-                                    Layout.fillWidth: true
-                                    text: !inputsValid
-                                          ? window.t("invalidInputHint")
-                                          : window.statusMessage.length > 0
-                                            ? window.statusMessage : gameManager.message
-                                    color: !inputsValid || window.statusIsError
-                                           || (window.statusMessage.length === 0 && gameManager.messageIsError)
-                                           ? "#b23339" : "#2a6d9e"
-                                    font.pixelSize: 11
-                                    wrapMode: Text.WrapAnywhere
-                                }
+                                Item { Layout.fillWidth: true }
                                 FluentButton {
                                     Layout.preferredWidth: 112
                                     Layout.preferredHeight: 32
@@ -733,12 +802,7 @@ ApplicationWindow {
                                     backdropScrollOffset: controlsFlick.contentY
                                     enabled: gameManager.selectedGamePath.length > 0
                                     text: window.t("modsFolder")
-                                    onClicked: {
-                                        const result = gameManager.openModsFolder()
-                                        window.setStatus(result.ok ? "statusModsOpened" : "statusOpenFailed",
-                                                         result.ok ? [] : [window.tf(result.messageKey, result.messageArgs)],
-                                                         !result.ok)
-                                    }
+                                    onClicked: gameManager.openModsFolder()
                                 }
                             }
                             Rectangle {
@@ -766,10 +830,9 @@ ApplicationWindow {
                                     onClicked: {
                                         const result = backpackGenerator.installMod(
                                             window.capacity, window.freeSlots, gameManager.selectedGamePath)
-                                        window.saveSucceeded = result.ok
-                                        window.setStatus(result.ok ? "statusInstalled" : "statusInstallFailed",
-                                                         [result.ok ? result.path : window.tf(result.messageKey, result.messageArgs)],
-                                                         !result.ok)
+                                        window.showNotice(window.tf(result.ok ? "statusInstalled" : "statusInstallFailed",
+                                                                    [result.ok ? result.path : window.tf(result.messageKey, result.messageArgs)]),
+                                                          !result.ok)
                                     }
                                 }
                             }

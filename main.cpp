@@ -75,7 +75,7 @@ int main(int argc, char *argv[])
     QGuiApplication app(argc, argv);
     QCoreApplication::setOrganizationName("wangcac");
     QCoreApplication::setApplicationName("BackpackTools");
-    QCoreApplication::setApplicationVersion(QStringLiteral("1.0.0"));
+    QCoreApplication::setApplicationVersion(QStringLiteral("1.0.5"));
     const QStringList installedFonts = QFontDatabase::families();
     QString uiFontFamily;
     for (const QString &candidate : {QStringLiteral("Source Han Sans SC"),

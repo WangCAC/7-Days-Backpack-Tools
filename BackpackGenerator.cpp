@@ -15,6 +15,14 @@
 #include <algorithm>
 
 namespace {
+// V3.3 large backpack (quality 6) adds up to 48 BagSize slots on top of the base inventory.
+constexpr int maxPhysicalBackpackBonus = 48;
+// Headroom for clothing and storage-pocket mods; the slots are added by the
+// equipped items instead of appearing in the player's base inventory.
+constexpr int equipmentReserveSlots = 40;
+// Pack Mule unlocks all 48 slots added by the physical backpack.
+constexpr int physicalBackpackPerkRanks[5] = {0, 8, 8, 16, 16};
+
 struct ZipEntry {
     QString name;
     QByteArray body;
@@ -150,7 +158,7 @@ BackpackGenerator::BackpackGenerator(QObject *parent) : QObject(parent)
     }
     m_files = data.object().value(QStringLiteral("files")).toObject();
     m_baseline = data.object().value(QStringLiteral("baseline")).toObject();
-    if (m_files.size() != 9)
+    if (m_files.size() != 10)
         m_loadError = QStringLiteral("errorTemplateIncomplete");
 }
 
@@ -158,11 +166,13 @@ BackpackGenerator::Layout BackpackGenerator::calculate(int capacity, int freeSlo
 {
     Layout result;
     result.capacity = capacity;
+    result.baseBagSize = capacity;
+    result.maxCapacity = capacity + maxPhysicalBackpackBonus + equipmentReserveSlots;
     result.freeSlots = freeSlots;
     result.extra = capacity - freeSlots;
 
     double bestScore = 1e100;
-    for (int cols = 8; cols <= 25; ++cols) {
+    for (int cols = 8; cols <= 20; ++cols) {
         const int rows = (capacity + cols - 1) / cols;
         const int unused = cols * rows - capacity;
         const double score = unused * 1.5 + qAbs(rows - 10) * 2
@@ -175,8 +185,12 @@ BackpackGenerator::Layout BackpackGenerator::calculate(int capacity, int freeSlo
         }
     }
 
-    result.cell = qRound(73.0 - (result.cols - 8) * 7.0 / 17.0);
-    result.width = result.cols * result.cell + qRound(19.0 + (result.cols - 8) * 9.0 / 17.0);
+    // Keep the viewport compact. The grid and MaxBagSize have room for both
+    // the physical backpack and equipment slots; BagSize reveals them on equip.
+    result.gridRows = (result.maxCapacity + result.cols - 1) / result.cols;
+    // At 20 columns, use the previous maximum panel width for larger cells.
+    result.cell = qRound(73.0 + (result.cols - 8) * 9.0 / 12.0);
+    result.width = result.cols * result.cell + qRound(19.0 + (result.cols - 8) * 9.0 / 12.0);
     result.interpolation = std::clamp((result.width - 603.0) / (1678.0 - 603.0), 0.0, 1.0);
     result.stackScale = qRound((1.05 + (0.75 - 1.05) * result.interpolation) * 100.0) / 100.0;
     // Keep the scaled backpack panel within the space available below other game windows.
@@ -189,11 +203,18 @@ BackpackGenerator::Layout BackpackGenerator::calculate(int capacity, int freeSlo
 
     const double fractions[5] = {10.0 / 125.0, 35.0 / 125.0, 70.0 / 125.0,
                                  95.0 / 125.0, 1.0};
+    int configuredTotal = 0;
+    int previousConfiguredTotal = 0;
+    int total = 0;
     for (int level = 0; level < 5; ++level) {
-        int value = level == 4 ? result.extra : qRound(result.extra * fractions[level]);
-        if (!result.perk.isEmpty())
-            value = qMax(value, result.perk.last());
-        result.perk.append(value);
+        configuredTotal = qMax(configuredTotal,
+                               level == 4 ? result.extra : qRound(result.extra * fractions[level]));
+        const int configuredRank = configuredTotal - previousConfiguredTotal;
+        const int rankBonus = configuredRank + physicalBackpackPerkRanks[level];
+        total += rankBonus;
+        result.perkRank.append(rankBonus);
+        result.perk.append(total);
+        previousConfiguredTotal = configuredTotal;
     }
     return result;
 }
@@ -205,14 +226,20 @@ QVariantMap BackpackGenerator::layout(int capacity, int freeSlots) const
 
     const Layout data = calculate(capacity, freeSlots);
     QVariantList perk;
+    QVariantList perkRank;
     for (int value : data.perk)
         perk.append(value);
+    for (int value : data.perkRank)
+        perkRank.append(value);
     return {{QStringLiteral("valid"), true},
             {QStringLiteral("capacity"), data.capacity},
+            {QStringLiteral("baseBagSize"), data.baseBagSize},
+            {QStringLiteral("maxCapacity"), data.maxCapacity},
             {QStringLiteral("free"), data.freeSlots},
             {QStringLiteral("extra"), data.extra},
             {QStringLiteral("cols"), data.cols},
             {QStringLiteral("rows"), data.rows},
+            {QStringLiteral("gridRows"), data.gridRows},
             {QStringLiteral("visibleRows"), data.visibleRows},
             {QStringLiteral("unused"), data.unused},
             {QStringLiteral("cell"), data.cell},
@@ -220,7 +247,11 @@ QVariantMap BackpackGenerator::layout(int capacity, int freeSlots) const
             {QStringLiteral("height"), data.height},
             {QStringLiteral("contentHeight"), data.contentHeight},
             {QStringLiteral("stackScale"), data.stackScale},
-            {QStringLiteral("perk"), perk}};
+            {QStringLiteral("configuredPerkTotal"), data.extra},
+            {QStringLiteral("backpackPerkTotal"), data.perk.last() - data.extra},
+            {QStringLiteral("perkTotal"), data.perk.last()},
+            {QStringLiteral("perk"), perk},
+            {QStringLiteral("perkRank"), perkRank}};
 }
 
 QUrl BackpackGenerator::suggestedFileUrl(int capacity, int freeSlots) const
@@ -256,15 +287,16 @@ QString BackpackGenerator::patchXml(const QString &relativePath, const QString &
         QString value = operation.text().trimmed();
 
         if (name == QStringLiteral("entityclasses.xml")) {
-            if (path.contains(QStringLiteral("property[@name='MaxBagSize']"))
-                || path.contains(QStringLiteral("passive_effect[@name='BagSize']")))
-                value = QString::number(layout.capacity);
+            if (path.contains(QStringLiteral("property[@name='MaxBagSize']")))
+                value = QString::number(layout.maxCapacity);
+            else if (path.contains(QStringLiteral("passive_effect[@name='BagSize']")))
+                value = QString::number(layout.baseBagSize);
             else if (path.contains(QStringLiteral(".carryCapacityBase")))
                 value = QString::number(layout.freeSlots);
             else {
                 const auto match = perkLevel.match(path);
                 if (match.hasMatch())
-                    value = QString::number(layout.perk.at(match.captured(1).toInt() - 1));
+                    value = QString::number(layout.perkRank.at(match.captured(1).toInt() - 1));
             }
         } else if (name == QStringLiteral("progression.xml")) {
             if (path.contains(QStringLiteral("perk[@name='perkPackMule']"))) {
@@ -282,7 +314,7 @@ QString BackpackGenerator::patchXml(const QString &relativePath, const QString &
             value = QString::number(layout.capacity + 5);
         } else if (name == QStringLiteral("loot.xml")) {
             const int lootCols = qBound(8, qRound(layout.cols * .72), 25);
-            value = QStringLiteral("%1,%2").arg(lootCols).arg(qMax(12, (layout.capacity + lootCols - 1) / lootCols + 2));
+            value = QStringLiteral("%1,%2").arg(lootCols).arg(qMax(12, (layout.maxCapacity + lootCols - 1) / lootCols + 2));
         } else if (name == QStringLiteral("xui.xml")) {
             value = QString::number(layout.stackScale, 'f', 2);
         } else if (name == QStringLiteral("windows.xml")
@@ -296,7 +328,7 @@ QString BackpackGenerator::patchXml(const QString &relativePath, const QString &
             else if (path.contains(QStringLiteral("rect[@name='content']/@height")))
                 value = QString::number(layout.contentHeight);
             else if (path.contains(QStringLiteral("grid[@name='inventory']/@rows")))
-                value = QString::number(layout.rows);
+                value = QString::number(layout.gridRows);
             else if (path.contains(QStringLiteral("grid[@name='inventory']/@cols")))
                 value = QString::number(layout.cols);
             else if (path.contains(QStringLiteral("grid[@name='inventory']/@cell_width"))
