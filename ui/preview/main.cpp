@@ -56,6 +56,94 @@ int main(int argc, char **argv) {
         if (auto *field=window->findChild<QQuickItem *>(name)) fields.append(field);
     window->installEventFilter(new FocusDismissFilter(window, fields));
     const QStringList args=app.arguments();
+    if (args.contains("--readme")) {
+        window->resize(1200,700);
+        auto findItem=[&](const char *name) {
+            auto *control=window->findChild<QQuickItem *>(name);
+            require(control,name); return control;
+        };
+        auto *preview=findItem("backpackPreview");
+        auto bounds=[](QQuickItem *control) {
+            require(control,"screenshot target missing");
+            return QRectF(control->mapToScene(QPointF()),control->size());
+        };
+        auto popupBounds=[&](QObject *popup) {
+            require(popup,"screenshot popup missing");
+            auto *content=popup->property("contentItem").value<QQuickItem *>();
+            require(content,"screenshot popup content missing");
+            return bounds(content->parentItem());
+        };
+        auto *games=backend->property("games").value<QObject *>();
+        games->setProperty("gamePaths",QStringList({"C:/Games/7 Days To Die/7DaysToDie.exe"}));
+        games->setProperty("selectedGamePath","C:/Games/7 Days To Die/7DaysToDie.exe");
+        for (const QString &language : {QStringLiteral("zh_CN"),QStringLiteral("en_US")}) {
+            localization.setLanguage(language);
+            const QString output=QStringLiteral(UI_SOURCE_DIR "/assets/screenshots/")
+                    +(language=="zh_CN" ? "zh-cn" : "en");
+            require(QDir().mkpath(output),"cannot create screenshot directory");
+            auto capture=[&](const QString &name,const QRectF &area=QRectF()) {
+                QTest::qWait(450);
+                // Offscreen captures start frame-driven transitions; let them settle.
+                window->grabWindow(); QTest::qWait(300);
+                window->grabWindow(); QTest::qWait(300);
+                const QImage image=window->grabWindow();
+                require(!image.isNull(),"documentation screenshot failed");
+                QImage shot=image;
+                if (!area.isEmpty()) {
+                    const qreal scale=image.devicePixelRatio();
+                    shot=image.copy(QRect(qRound(area.x()*scale),qRound(area.y()*scale),
+                                          qRound(area.width()*scale),qRound(area.height()*scale)));
+                }
+                require(shot.save(output+"/"+name+".png"),"cannot save documentation screenshot");
+            };
+            findItem("capacityInput")->setProperty("text","200");
+            findItem("freeInput")->setProperty("text","50");
+            findItem("backpackInput")->setProperty("text","200");
+            preview->setProperty("physicalEnabled",true);
+            preview->setProperty("perkEnabled",true);
+            preview->setProperty("perkLevel",3);
+            preview->setProperty("backpackType",2);
+            preview->setProperty("backpackQuality",5);
+            preview->setProperty("gameMode",false);
+            capture("main");
+            const QRectF previewArea=bounds(preview->parentItem()).adjusted(-1,-1,1,1);
+            capture("preview-mode",previewArea);
+            preview->setProperty("gameMode",true);
+            capture("game-mode",previewArea);
+            preview->setProperty("gameMode",false);
+            findItem("capacityInput")->setProperty("text","40");
+            findItem("freeInput")->setProperty("text","32");
+            findItem("backpackInput")->setProperty("text","48");
+            preview->setProperty("physicalEnabled",false);
+            preview->setProperty("perkEnabled",false);
+            QTest::qWait(300);
+            // Capture the actual controls, including labels, at their rendered positions.
+            const QRectF settingsArea=bounds(findItem("capacityInput")->parentItem()->parentItem())
+                    .united(bounds(findItem("detailsButton"))).adjusted(-10,-10,10,10);
+            capture("settings",settingsArea);
+            const QRectF gameArea=bounds(findItem("gameCombo"))
+                    .united(bounds(findItem("installButton"))).adjusted(-10,-10,10,10);
+            capture("installation",gameArea);
+            auto *details=window->findChild<QObject *>("detailsDialog");
+            require(details,"details dialog missing");
+            QMetaObject::invokeMethod(details,"open");
+            QTest::qWait(350);
+            capture("details",popupBounds(details).adjusted(-8,-8,8,8));
+            auto *detailsContent=details->property("contentItem").value<QQuickItem *>();
+            detailsContent->setProperty("contentY",qMax(0.0,detailsContent->property("contentHeight").toReal()-detailsContent->height()));
+            capture("backpack-details",popupBounds(details).adjusted(-8,-8,8,8));
+            QMetaObject::invokeMethod(details,"close"); QTest::qWait(250);
+            QMetaObject::invokeMethod(findItem("installButton"),"clicked");
+            QTest::qWait(350);
+            auto *notice=window->findChild<QObject *>("noticeDialog");
+            require(notice,"install notice missing");
+            capture("install-confirmation",popupBounds(notice).adjusted(-8,-8,8,8));
+            QMetaObject::invokeMethod(findItem("noticeConfirmButton"),"clicked"); QTest::qWait(250);
+        }
+        require(warnings==0,"QML warnings while generating documentation screenshots");
+        qInfo()<<"README screenshots generated in Chinese and English";
+        return 0;
+    }
     if (!args.contains("--capture")) {
         QTimer::singleShot(800, window, [window] {
             qInfo() << "Live preview" << QGuiApplication::platformName() << window->isVisible() << window->size() << window->winId();
