@@ -1,5 +1,7 @@
 **简体中文** | [English](README_EN.md)
 
+[更新日志](CHANGELOG.md)
+
 <div align="center">
   <img src="https://i.postimg.cc/FrXKnPs2/20260929154612327.webp?dl=1" alt="七日杀自定义背包容量工具 Logo" width="112">
 
@@ -7,7 +9,7 @@
   <h1>七日杀自定义背包容量工具</h1>
 
   <p>按自己的玩法设置背包容量与初始免负重格数，预览效果，然后一键生成模组。</p>
-  <p><strong>v1.0.5</strong> · Windows · 适配《七日杀》V3.3 及以上版本</p>
+  <p><strong>v1.3.0</strong> · Windows · 适配《七日杀》V3.3 及以上版本</p>
 
   <p>
     <a href="#项目介绍">项目介绍</a> ·

@@ -1,10 +1,10 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(BackpackTools VERSION 1.0.5 LANGUAGES CXX)
+project(BackpackTools VERSION 1.3.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Quick Xml Concurrent Gui Svg)
+find_package(Qt6 REQUIRED COMPONENTS Quick QuickControls2 Xml Concurrent Gui Svg)
 
 qt_standard_project_setup(REQUIRES 6.8)
 
@@ -16,6 +16,7 @@ qt_add_executable(appBackpackTools
     GameManager.h
     LocalizationManager.cpp
     LocalizationManager.h
+    ui/FocusDismissFilter.h
 )
 
 if(WIN32)
@@ -37,6 +38,9 @@ qt_add_resources(appBackpackTools "branding"
     PREFIX "/"
     FILES assets/backpack-logo.svg assets/help-circle.svg
           assets/language-globe.svg assets/chevron-down.svg
+          assets/help-solid.svg assets/close.svg assets/check.svg
+          assets/external-link.svg assets/weight.svg assets/inventory.svg
+          assets/pixel-backpack.svg assets/pixel-forbidden.svg
 )
 
 qt_add_qml_module(appBackpackTools
@@ -44,7 +48,22 @@ qt_add_qml_module(appBackpackTools
     VERSION 1.0
     QML_FILES
         Main.qml
-        FluentButton.qml
+        PixelIcon.qml
+        BackpackPreview.qml
+        DataDetailsDialog.qml
+        ui/Theme.js
+        ui/Ripple.qml
+        ui/MaterialButton.qml
+        ui/MaterialCheckBox.qml
+        ui/MaterialNumberSetting.qml
+        ui/MaterialScrollBar.qml
+        ui/MaterialPopup.qml
+        ui/MaterialDialog.qml
+        ui/SvgIcon.qml
+        ui/MaterialComboBox.qml
+        ui/MaterialMenuItem.qml
+        ui/MaterialToolTip.qml
+        ui/PreviewModeButton.qml
 )
 
 # Qt for iOS sets MACOSX_BUNDLE_GUI_IDENTIFIER automatically since Qt 6.1.
@@ -59,7 +78,7 @@ set_target_properties(appBackpackTools PROPERTIES
 )
 
 target_link_libraries(appBackpackTools
-    PRIVATE Qt6::Quick Qt6::Xml Qt6::Concurrent Qt6::Gui Qt6::Svg
+    PRIVATE Qt6::Quick Qt6::QuickControls2 Qt6::Xml Qt6::Concurrent Qt6::Gui Qt6::Svg
 )
 
 include(GNUInstallDirs)

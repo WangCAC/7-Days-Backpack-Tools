@@ -15,13 +15,21 @@
 #include <algorithm>
 
 namespace {
-// V3.3 large backpack (quality 6) adds up to 48 BagSize slots on top of the base inventory.
-constexpr int maxPhysicalBackpackBonus = 48;
+// Scale the original V3.3 quality values against the large quality-6 backpack.
+constexpr int vanillaBackpacks[3][6] = {{2, 4, 6, 8, 12, 16},
+                                      {18, 20, 22, 24, 28, 32},
+                                      {34, 36, 38, 40, 44, 48}};
 // Headroom for clothing and storage-pocket mods; the slots are added by the
 // equipped items instead of appearing in the player's base inventory.
 constexpr int equipmentReserveSlots = 40;
-// Pack Mule unlocks all 48 slots added by the physical backpack.
-constexpr int physicalBackpackPerkRanks[5] = {0, 8, 8, 16, 16};
+// Cumulative shares corresponding to the agreed increments 0, 8, 8, 16, 16.
+constexpr int physicalBackpackPerkTotals[5] = {0, 8, 16, 32, 48};
+
+bool validInputs(int capacity, int freeSlots, int backpackCapacity)
+{
+    return capacity >= 1 && capacity <= 5000 && freeSlots >= 0
+           && freeSlots <= capacity && backpackCapacity >= 0 && backpackCapacity <= 5000;
+}
 
 struct ZipEntry {
     QString name;
@@ -33,6 +41,33 @@ QVariantMap failure(const QString &key, const QVariantList &arguments = {})
     return {{QStringLiteral("ok"), false},
             {QStringLiteral("messageKey"), key},
             {QStringLiteral("messageArgs"), arguments}};
+}
+
+// Remove links themselves, never the directories they point to. Normal
+// directories must resolve inside the selected game's Mods directory.
+bool removeModTree(const QString &path, const QString &modsRoot)
+{
+    const QFileInfo entry(path);
+    if (entry.isSymbolicLink() || entry.isJunction())
+        return entry.isDir() || entry.isJunction()
+                   ? QDir().rmdir(path) || QFile::remove(path)
+                   : QFile::remove(path);
+    if (!entry.exists())
+        return true;
+    const QString resolved = entry.canonicalFilePath();
+    if (resolved.isEmpty()
+        || !resolved.startsWith(modsRoot + QLatin1Char('/'), Qt::CaseInsensitive))
+        return false;
+    if (!entry.isDir())
+        return QFile::remove(path);
+
+    const auto children = QDir(path).entryInfoList(
+        QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden | QDir::System);
+    for (const QFileInfo &child : children) {
+        if (!removeModTree(child.absoluteFilePath(), modsRoot))
+            return false;
+    }
+    return QDir().rmdir(path);
 }
 
 void append16(QByteArray &bytes, quint16 value)
@@ -162,14 +197,21 @@ BackpackGenerator::BackpackGenerator(QObject *parent) : QObject(parent)
         m_loadError = QStringLiteral("errorTemplateIncomplete");
 }
 
-BackpackGenerator::Layout BackpackGenerator::calculate(int capacity, int freeSlots)
+BackpackGenerator::Layout BackpackGenerator::calculate(int capacity, int freeSlots, int backpackCapacity)
 {
     Layout result;
     result.capacity = capacity;
     result.baseBagSize = capacity;
-    result.maxCapacity = capacity + maxPhysicalBackpackBonus + equipmentReserveSlots;
+    result.backpackCapacity = backpackCapacity;
+    result.maxCapacity = capacity + backpackCapacity + equipmentReserveSlots;
     result.freeSlots = freeSlots;
     result.extra = capacity - freeSlots;
+    for (const auto &qualities : vanillaBackpacks) {
+        QList<int> amounts;
+        for (int amount : qualities)
+            amounts.append(qRound(backpackCapacity * amount / 48.0));
+        result.backpacks.append(amounts);
+    }
 
     double bestScore = 1e100;
     for (int cols = 8; cols <= 20; ++cols) {
@@ -195,11 +237,16 @@ BackpackGenerator::Layout BackpackGenerator::calculate(int capacity, int freeSlo
     result.stackScale = qRound((1.05 + (0.75 - 1.05) * result.interpolation) * 100.0) / 100.0;
     // Keep the scaled backpack panel within the space available below other game windows.
     // The grid retains every row; only the scrollview's visible area is shortened.
-    constexpr double maxScaledPanelHeight = 540.0;
+    constexpr double maxScaledPanelHeight = 480.0;
     const int rowsThatFit = qFloor((maxScaledPanelHeight / result.stackScale - 57.0) / result.cell);
-    result.visibleRows = qMin(result.rows, qBound(1, rowsThatFit, 10));
+    result.visibleRows = qMin(result.gridRows, qBound(1, rowsThatFit, 10));
     result.contentHeight = result.visibleRows * result.cell + 11;
     result.height = result.contentHeight + 46;
+    // Use the reference mod's 10-column death container and extra 30 slots.
+    // Keep its viewport bounded instead of displaying every loot row at once.
+    result.lootRows = (result.maxCapacity + 30 + result.lootCols - 1) / result.lootCols;
+    const int lootVisibleRows = qBound(1, qFloor((480.0 / result.stackScale - 49) / 75), 7);
+    result.lootContentHeight = lootVisibleRows * 75 + 6;
 
     const double fractions[5] = {10.0 / 125.0, 35.0 / 125.0, 70.0 / 125.0,
                                  95.0 / 125.0, 1.0};
@@ -210,31 +257,56 @@ BackpackGenerator::Layout BackpackGenerator::calculate(int capacity, int freeSlo
         configuredTotal = qMax(configuredTotal,
                                level == 4 ? result.extra : qRound(result.extra * fractions[level]));
         const int configuredRank = configuredTotal - previousConfiguredTotal;
-        const int rankBonus = configuredRank + physicalBackpackPerkRanks[level];
+        const int backpackTotal = qRound(backpackCapacity * physicalBackpackPerkTotals[level] / 48.0);
+        const int previousBackpackTotal = level == 0 ? 0 : result.backpackPerk.last();
+        const int rankBonus = configuredRank + backpackTotal - previousBackpackTotal;
         total += rankBonus;
         result.perkRank.append(rankBonus);
         result.perk.append(total);
+        result.configuredPerk.append(configuredTotal);
+        result.backpackPerk.append(backpackTotal);
         previousConfiguredTotal = configuredTotal;
     }
     return result;
 }
 
-QVariantMap BackpackGenerator::layout(int capacity, int freeSlots) const
+QVariantMap BackpackGenerator::layout(int capacity, int freeSlots, int backpackCapacity) const
 {
-    if (capacity < 1 || capacity > 5000 || freeSlots < 0 || freeSlots > capacity)
+    if (!validInputs(capacity, freeSlots, backpackCapacity))
         return {{QStringLiteral("valid"), false}};
 
-    const Layout data = calculate(capacity, freeSlots);
+    const Layout data = calculate(capacity, freeSlots, backpackCapacity);
     QVariantList perk;
     QVariantList perkRank;
+    QVariantList configuredPerk;
+    QVariantList backpackPerk;
+    QVariantList backpacks;
     for (int value : data.perk)
         perk.append(value);
     for (int value : data.perkRank)
         perkRank.append(value);
+    for (int value : data.configuredPerk)
+        configuredPerk.append(value);
+    for (int value : data.backpackPerk)
+        backpackPerk.append(value);
+    for (const auto &qualities : data.backpacks) {
+        QVariantList amounts;
+        for (int value : qualities)
+            amounts.append(value);
+        backpacks.append(QVariant::fromValue(amounts));
+    }
     return {{QStringLiteral("valid"), true},
             {QStringLiteral("capacity"), data.capacity},
             {QStringLiteral("baseBagSize"), data.baseBagSize},
             {QStringLiteral("maxCapacity"), data.maxCapacity},
+            {QStringLiteral("backpackCapacity"), data.backpackCapacity},
+            {QStringLiteral("equipmentReserve"), equipmentReserveSlots},
+            {QStringLiteral("backpacks"), backpacks},
+            {QStringLiteral("configuredPerk"), configuredPerk},
+            {QStringLiteral("backpackPerk"), backpackPerk},
+            {QStringLiteral("lootCols"), data.lootCols},
+            {QStringLiteral("lootRows"), data.lootRows},
+            {QStringLiteral("lootContentHeight"), data.lootContentHeight},
             {QStringLiteral("free"), data.freeSlots},
             {QStringLiteral("extra"), data.extra},
             {QStringLiteral("cols"), data.cols},
@@ -254,9 +326,10 @@ QVariantMap BackpackGenerator::layout(int capacity, int freeSlots) const
             {QStringLiteral("perkRank"), perkRank}};
 }
 
-QUrl BackpackGenerator::suggestedFileUrl(int capacity, int freeSlots) const
+QUrl BackpackGenerator::suggestedFileUrl(int capacity, int freeSlots, int backpackCapacity) const
 {
-    const QString name = QStringLiteral("wangcac-%1BigBackpack%2WB.zip").arg(capacity).arg(freeSlots);
+    const QString name = QStringLiteral("wangcac-%1BigBackpack%2WB-BP%3.zip")
+                             .arg(capacity).arg(freeSlots).arg(backpackCapacity);
     QString directory = QStandardPaths::writableLocation(QStandardPaths::DownloadLocation);
     if (directory.isEmpty())
         directory = QStandardPaths::writableLocation(QStandardPaths::HomeLocation);
@@ -305,16 +378,28 @@ QString BackpackGenerator::patchXml(const QString &relativePath, const QString &
                     levels.append(QString::number(amount));
                 value = levels.join(u',');
             } else {
-                value = QString::number(layout.capacity);
+                value = QString::number(layout.maxCapacity);
             }
         } else if (name == QStringLiteral("buffs.xml")) {
-            value = QString::number(layout.capacity
-                                    + (path.contains(QStringLiteral("buff[@name='god']")) ? 0 : 5));
+            value = QString::number(layout.maxCapacity);
         } else if (name == QStringLiteral("items.xml")) {
-            value = QString::number(layout.capacity + 5);
+            int backpackType = -1;
+            if (path.contains(QStringLiteral("item[@name='backpackSmall']")))
+                backpackType = 0;
+            else if (path.contains(QStringLiteral("item[@name='backpackMedium']")))
+                backpackType = 1;
+            else if (path.contains(QStringLiteral("item[@name='backpackLarge']")))
+                backpackType = 2;
+            if (backpackType >= 0) {
+                QStringList amounts;
+                for (int amount : layout.backpacks.at(backpackType))
+                    amounts.append(QString::number(amount));
+                value = amounts.join(u',');
+            } else {
+                value = QString::number(layout.maxCapacity);
+            }
         } else if (name == QStringLiteral("loot.xml")) {
-            const int lootCols = qBound(8, qRound(layout.cols * .72), 25);
-            value = QStringLiteral("%1,%2").arg(lootCols).arg(qMax(12, (layout.maxCapacity + lootCols - 1) / lootCols + 2));
+            value = QStringLiteral("%1,%2").arg(layout.lootCols).arg(layout.lootRows);
         } else if (name == QStringLiteral("xui.xml")) {
             value = QString::number(layout.stackScale, 'f', 2);
         } else if (name == QStringLiteral("windows.xml")
@@ -337,6 +422,16 @@ QString BackpackGenerator::patchXml(const QString &relativePath, const QString &
                 value = QString::number(layout.cell);
             else if (baseline.contains(path))
                 value = interpolateText(baseline.value(path).toString(), value, layout.interpolation);
+        } else if (name == QStringLiteral("windows.xml")
+                   && path.contains(QStringLiteral("window[@name='windowBagStorage']"))) {
+            if (path.endsWith(QStringLiteral("/window[@name='windowBagStorage']/@height")))
+                value = QString::number(layout.lootContentHeight + 49);
+            else if (path.contains(QStringLiteral("rect[@name='content']/@height")))
+                value = QString::number(layout.lootContentHeight);
+            else if (path.contains(QStringLiteral("grid[@name='queue']/@rows")))
+                value = QString::number(layout.lootRows);
+            else if (path.contains(QStringLiteral("grid[@name='queue']/@cols")))
+                value = QString::number(layout.lootCols);
         } else if ((name == QStringLiteral("windows.xml") || name == QStringLiteral("templates.xml"))
                    && baseline.contains(path)) {
             value = interpolateText(baseline.value(path).toString(), value, layout.interpolation);
@@ -354,25 +449,25 @@ QString BackpackGenerator::modInfo(const Layout &layout, const QString &folder) 
     return QStringLiteral("<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
                           "<xml>\n"
                           "  <Name value=\"%1\" />\n"
-                          "  <DisplayName value=\"%2格大背包%3格负重（V3.3宽版UI）\" />\n"
-                          "  <Version value=\"3.3.0.3\" />\n"
+                          "  <DisplayName value=\"%2格人物背包，初始免负重%3格，实体背包最大%4格\" />\n"
+                          "  <Version value=\"1.2.0\" />\n"
                           "  <Description value=\"打破背包模组的频繁更换\" />\n"
                           "  <Author value=\"wangcac制作\" />\n"
                           "  <Website value=\"QQ1843608878\" />\n"
                           "</xml>\n")
-        .arg(folder).arg(layout.capacity).arg(layout.freeSlots);
+        .arg(folder).arg(layout.capacity).arg(layout.freeSlots).arg(layout.backpackCapacity);
 }
 
-QVariantMap BackpackGenerator::saveZip(int capacity, int freeSlots, const QUrl &destination) const
+QVariantMap BackpackGenerator::saveZip(int capacity, int freeSlots, int backpackCapacity, const QUrl &destination) const
 {
-    if (capacity < 1 || capacity > 5000 || freeSlots < 0 || freeSlots > capacity)
+    if (!validInputs(capacity, freeSlots, backpackCapacity))
         return failure(QStringLiteral("errorInvalidInput"));
     if (!m_loadError.isEmpty())
         return failure(m_loadError, m_loadErrorArgs);
     if (!destination.isLocalFile())
         return failure(QStringLiteral("errorLocalSave"));
 
-    const Layout data = calculate(capacity, freeSlots);
+    const Layout data = calculate(capacity, freeSlots, backpackCapacity);
     const QString folder = QStringLiteral("wangcac-%1BigBackpack%2WB").arg(capacity).arg(freeSlots);
     QList<ZipEntry> entries;
     entries.append({folder + QStringLiteral("/ModInfo.xml"), modInfo(data, folder).toUtf8()});
@@ -396,10 +491,10 @@ QVariantMap BackpackGenerator::saveZip(int capacity, int freeSlots, const QUrl &
     return {{QStringLiteral("ok"), true}, {QStringLiteral("path"), target}};
 }
 
-QVariantMap BackpackGenerator::installMod(int capacity, int freeSlots,
+QVariantMap BackpackGenerator::installMod(int capacity, int freeSlots, int backpackCapacity,
                                           const QString &gameProgramPath) const
 {
-    if (capacity < 1 || capacity > 5000 || freeSlots < 0 || freeSlots > capacity)
+    if (!validInputs(capacity, freeSlots, backpackCapacity))
         return failure(QStringLiteral("errorInvalidInput"));
     if (!m_loadError.isEmpty())
         return failure(m_loadError, m_loadErrorArgs);
@@ -409,7 +504,7 @@ QVariantMap BackpackGenerator::installMod(int capacity, int freeSlots,
         || program.fileName().compare(QStringLiteral("7DaysToDie.exe"), Qt::CaseInsensitive) != 0)
         return failure(QStringLiteral("errorChooseGame"));
 
-    const Layout data = calculate(capacity, freeSlots);
+    const Layout data = calculate(capacity, freeSlots, backpackCapacity);
     const QString folder = QStringLiteral("wangcac-%1BigBackpack%2WB").arg(capacity).arg(freeSlots);
     QList<ZipEntry> files;
     files.append({QStringLiteral("ModInfo.xml"), modInfo(data, folder).toUtf8()});
@@ -437,4 +532,41 @@ QVariantMap BackpackGenerator::installMod(int capacity, int freeSlots,
             return failure(QStringLiteral("errorWriteFile"), {target, output.errorString()});
     }
     return {{QStringLiteral("ok"), true}, {QStringLiteral("path"), modDirectory}};
+}
+
+QVariantMap BackpackGenerator::removeOtherGeneratedMods(const QString &gameProgramPath,
+                                                        const QString &installedModPath) const
+{
+    const QFileInfo program(gameProgramPath);
+    if (!program.isFile()
+        || program.fileName().compare(QStringLiteral("7DaysToDie.exe"), Qt::CaseInsensitive) != 0)
+        return failure(QStringLiteral("errorChooseGame"));
+
+    const QDir mods(QDir(program.absolutePath()).filePath(QStringLiteral("Mods")));
+    const QString modsRoot = QFileInfo(mods.absolutePath()).canonicalFilePath();
+    const QFileInfo installed(installedModPath);
+    // Validate the successful installation before deleting any sibling folders.
+    if (modsRoot.isEmpty() || !installed.isDir() || installed.isSymbolicLink() || installed.isJunction()
+        || !installed.fileName().startsWith(QStringLiteral("wangcac-"), Qt::CaseInsensitive)
+        || QFileInfo(installed.absolutePath()).canonicalFilePath().compare(modsRoot, Qt::CaseInsensitive) != 0
+        || !QFileInfo(QDir(installed.absoluteFilePath()).filePath(QStringLiteral("ModInfo.xml"))).isFile())
+        return failure(QStringLiteral("errorCleanupLocation"));
+
+    QStringList failed;
+    int removed = 0;
+    const auto entries = mods.entryInfoList(
+        QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden | QDir::System);
+    for (const QFileInfo &entry : entries) {
+        if (!entry.fileName().startsWith(QStringLiteral("wangcac-"), Qt::CaseInsensitive)
+            || entry.fileName().compare(installed.fileName(), Qt::CaseInsensitive) == 0
+            || !(entry.isDir() || entry.isJunction() || entry.isSymbolicLink()))
+            continue;
+        if (removeModTree(entry.absoluteFilePath(), modsRoot))
+            ++removed;
+        else
+            failed.append(entry.absoluteFilePath());
+    }
+    if (!failed.isEmpty())
+        return failure(QStringLiteral("errorCleanupMods"), {failed.join(QLatin1Char('\n'))});
+    return {{QStringLiteral("ok"), true}, {QStringLiteral("removed"), removed}};
 }

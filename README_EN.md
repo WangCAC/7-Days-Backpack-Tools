@@ -1,5 +1,7 @@
 [简体中文](README.md) | **English**
 
+[Changelog](CHANGELOG_EN.md)
+
 <div align="center">
   <img src="https://i.postimg.cc/FrXKnPs2/20260929154612327.webp?dl=1" alt="7 Days to Die Custom Backpack Capacity Tool logo" width="112">
 
@@ -7,7 +9,7 @@
   <h1>7 Days to Die Custom Backpack Capacity Tool</h1>
 
   <p>Set the backpack capacity and starting unencumbered slots to suit your playstyle, preview the result, and generate the mod in one click.</p>
-  <p><strong>v1.0.5</strong> · Windows · Supports 7 Days to Die V3.3 and later</p>
+  <p><strong>v1.3.0</strong> · Windows · Supports 7 Days to Die V3.3 and later</p>
 
   <p>
     <a href="#about-the-project">About</a> ·

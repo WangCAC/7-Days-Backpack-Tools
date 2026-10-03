@@ -10,6 +10,7 @@
 #include <QPixmap>
 #include <QQuickItem>
 #include <QQuickWindow>
+#include <QQuickStyle>
 #include <QSvgRenderer>
 #include <QStringList>
 #include <QTimer>
@@ -19,63 +20,15 @@
 #include "BackpackGenerator.h"
 #include "GameManager.h"
 #include "LocalizationManager.h"
-
-class FocusDismissFilter final : public QObject
-{
-public:
-    FocusDismissFilter(QQuickWindow *window, const QList<QQuickItem *> &fields)
-        : QObject(window), m_window(window)
-    {
-        for (QQuickItem *field : fields)
-            m_fields.append(field);
-    }
-
-protected:
-    bool eventFilter(QObject *watched, QEvent *event) override
-    {
-        if (watched != m_window.data() || event->type() != QEvent::MouseButtonRelease)
-            return false;
-
-        const auto *mouse = static_cast<QMouseEvent *>(event);
-        if (mouse->button() != Qt::LeftButton)
-            return false;
-
-        const QPointF position = mouse->position();
-        for (const QPointer<QQuickItem> &field : m_fields) {
-            if (field && field->contains(field->mapFromScene(position)))
-                return false;
-        }
-
-        // Run after the clicked control has processed the release. This avoids
-        // taking focus away from another control that legitimately received it.
-        QTimer::singleShot(0, m_window.data(),
-                           [window = m_window, fields = m_fields]() {
-            if (!window || !window->contentItem())
-                return;
-            bool dismissed = false;
-            for (const QPointer<QQuickItem> &field : fields) {
-                if (field && field->hasActiveFocus()) {
-                    field->setFocus(false);
-                    dismissed = true;
-                }
-            }
-            if (dismissed)
-                window->contentItem()->forceActiveFocus(Qt::MouseFocusReason);
-        });
-        return false;
-    }
-
-private:
-    QPointer<QQuickWindow> m_window;
-    QList<QPointer<QQuickItem>> m_fields;
-};
+#include "ui/FocusDismissFilter.h"
 
 int main(int argc, char *argv[])
 {
     QGuiApplication app(argc, argv);
+    QQuickStyle::setStyle(QStringLiteral("Basic"));
     QCoreApplication::setOrganizationName("wangcac");
     QCoreApplication::setApplicationName("BackpackTools");
-    QCoreApplication::setApplicationVersion(QStringLiteral("1.0.5"));
+    QCoreApplication::setApplicationVersion(QStringLiteral("1.3.0"));
     const QStringList installedFonts = QFontDatabase::families();
     QString uiFontFamily;
     for (const QString &candidate : {QStringLiteral("Source Han Sans SC"),
@@ -129,7 +82,8 @@ int main(int argc, char *argv[])
         auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().constFirst());
         if (window && window->contentItem()) {
             QList<QQuickItem *> focusFields;
-            for (const char *name : {"capacityInput", "freeInput", "gameCombo"}) {
+            for (const char *name : {"capacityInput", "freeInput", "backpackInput", "gameCombo",
+                                     "previewTypeCombo", "previewQualityCombo", "previewPerkCombo"}) {
                 if (auto *field = window->contentItem()->findChild<QQuickItem *>(QString::fromLatin1(name)))
                     focusFields.append(field);
             }
