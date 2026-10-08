@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(BackpackTools VERSION 1.3.0 LANGUAGES CXX)
+project(BackpackTools VERSION 1.4.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -41,6 +41,10 @@ qt_add_resources(appBackpackTools "branding"
           assets/help-solid.svg assets/close.svg assets/check.svg
           assets/external-link.svg assets/weight.svg assets/inventory.svg
           assets/pixel-backpack.svg assets/pixel-forbidden.svg
+          assets/action-list.svg assets/action-wand-sparkles.svg
+          assets/action-file-search.svg assets/action-scan-search.svg
+          assets/action-folder-open.svg assets/action-package-plus.svg
+          assets/action-download.svg assets/lucide-LICENSE.txt
 )
 
 qt_add_qml_module(appBackpackTools
@@ -56,6 +60,7 @@ qt_add_qml_module(appBackpackTools
         ui/MaterialButton.qml
         ui/MaterialCheckBox.qml
         ui/MaterialNumberSetting.qml
+        ui/MaterialSliderSetting.qml
         ui/MaterialScrollBar.qml
         ui/MaterialPopup.qml
         ui/MaterialDialog.qml

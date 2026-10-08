@@ -6,13 +6,16 @@ Button {
     id: control
     // primary: filled; accent: filled tonal; secondary: outlined; ghost: text.
     property string buttonStyle: "secondary"
+    property string iconName: ""
+    property int iconSize: 18
     readonly property bool filled: buttonStyle === "primary"
     readonly property bool tonal: buttonStyle === "accent"
     readonly property bool outlined: buttonStyle === "secondary"
     readonly property color labelColor: !enabled ? Theme.alpha(Theme.onSurface, 0.38)
         : filled ? Theme.onPrimary : tonal ? Theme.onSecondaryContainer : Theme.primary
     implicitHeight: 40
-    leftPadding: 16; rightPadding: 16
+    leftPadding: iconName.length > 0 ? 12 : 16
+    rightPadding: leftPadding
     topPadding: 0; bottomPadding: 0
     focusPolicy: Qt.StrongFocus
     hoverEnabled: true
@@ -23,13 +26,36 @@ Button {
                             pointer.hovered ? pointer.point.position.y : height / 2)
     onReleased: ripple.release()
     onCanceled: ripple.release()
-    contentItem: Text {
-        text: control.text
-        font: control.font
-        color: control.labelColor
-        horizontalAlignment: Text.AlignHCenter
-        verticalAlignment: Text.AlignVCenter
-        elide: Text.ElideRight
+    contentItem: Item {
+        id: buttonContent
+        readonly property bool hasIcon: control.iconName.length > 0
+        readonly property int iconAdvance: hasIcon ? control.iconSize + 6 : 0
+        implicitWidth: buttonLabel.implicitWidth + iconAdvance
+        implicitHeight: Math.max(buttonLabel.implicitHeight, hasIcon ? control.iconSize : 0)
+        Row {
+            anchors.centerIn: parent
+            spacing: buttonContent.hasIcon ? 6 : 0
+            SvgIcon {
+                objectName: control.objectName.length > 0 ? control.objectName + "Icon" : ""
+                visible: buttonContent.hasIcon
+                width: control.iconSize; height: width
+                anchors.verticalCenter: parent.verticalCenter
+                kind: control.iconName
+                tint: control.labelColor
+            }
+            Text {
+                id: buttonLabel
+                objectName: control.objectName.length > 0 ? control.objectName + "Label" : ""
+                width: Math.min(implicitWidth, Math.max(0, buttonContent.width - buttonContent.iconAdvance))
+                text: control.text
+                font: control.font
+                color: control.labelColor
+                horizontalAlignment: Text.AlignHCenter
+                verticalAlignment: Text.AlignVCenter
+                elide: Text.ElideRight
+                anchors.verticalCenter: parent.verticalCenter
+            }
+        }
     }
     background: Rectangle {
         radius: Math.min(Theme.controlRadius, height / 2)

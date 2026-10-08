@@ -12,7 +12,10 @@ Item {
         help: "help-circle", helpSolid: "help-solid", language: "language-globe",
         chevron: "chevron-down", close: "close", check: "check",
         external: "external-link", weight: "weight", inventory: "inventory",
-        backpack: "pixel-backpack", forbidden: "pixel-forbidden"
+        backpack: "pixel-backpack", forbidden: "pixel-forbidden",
+        details: "action-list", autoFit: "action-wand-sparkles",
+        browse: "action-file-search", scan: "action-scan-search",
+        folder: "action-folder-open", install: "action-package-plus", export: "action-download"
     })
     readonly property url source: "qrc:/assets/" + (assetNames[kind] || assetNames.help) + ".svg"
     readonly property int status: artwork.status

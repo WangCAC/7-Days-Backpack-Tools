@@ -24,6 +24,9 @@ ApplicationWindow {
     property int capacity: Number(capacityInput.text)
     property int freeSlots: Number(freeInput.text)
     property int backpackCapacity: Number(backpackInput.text)
+    readonly property int columns: Math.round(columnsSetting.value)
+    readonly property int maxBackpackWidth: Math.round(widthSetting.value)
+    readonly property int compactActionHeight: 34
     property bool inputsValid: capacityInput.text.length > 0 && freeInput.text.length > 0
                                && Number.isInteger(Number(capacityInput.text))
                                && Number.isInteger(Number(freeInput.text))
@@ -32,7 +35,8 @@ ApplicationWindow {
                                && capacity >= 1 && capacity <= 5000
                                && freeSlots >= 0 && freeSlots <= capacity
                                && backpackCapacity >= 0 && backpackCapacity <= 5000
-    property var currentLayout: inputsValid ? backpackGenerator.layout(capacity, freeSlots, backpackCapacity) : ({"valid": false})
+    property var currentLayout: inputsValid ? backpackGenerator.layout(capacity, freeSlots, backpackCapacity,
+                                                                       columns, maxBackpackWidth) : ({"valid": false})
     property bool scanNoticePending: false
 
     function t(key) {
@@ -70,7 +74,8 @@ ApplicationWindow {
         fileMode: FileDialog.SaveFile
         nameFilters: [window.t("zipFilter")]
         onAccepted: {
-            const result = backpackGenerator.saveZip(window.capacity, window.freeSlots, window.backpackCapacity, selectedFile)
+            const result = backpackGenerator.saveZip(window.capacity, window.freeSlots, window.backpackCapacity,
+                                                       selectedFile, window.columns, window.maxBackpackWidth)
             window.showNotice(window.tf(result.ok ? "statusSaved" : "statusGenerateFailed",
                                         [result.ok ? result.path : window.tf(result.messageKey, result.messageArgs)]),
                               !result.ok)
@@ -424,6 +429,10 @@ ApplicationWindow {
 
                 Rectangle {
                     Layout.preferredWidth: 350; Layout.minimumWidth: 330; Layout.fillHeight: true
+                    id: settingsPanel
+                    readonly property int contentInset: 22
+                    readonly property int actionSpacing: 8
+                    readonly property real actionWidth: (width - contentInset * 2 - actionSpacing) / 2
                     radius: Theme.panelRadius
                     color: Theme.surface; border.color: Theme.outlineVariant
                     layer.enabled: false
@@ -441,18 +450,24 @@ ApplicationWindow {
                         anchors.top: parent.top
                         anchors.bottom: footerBar.top
                         anchors.bottomMargin: 8
-                        contentWidth: width; contentHeight: settingsColumn.implicitHeight + 40
+                        contentWidth: width; contentHeight: settingsColumn.y + settingsColumn.implicitHeight + 4
                         clip: true; boundsBehavior: Flickable.StopAtBounds
                         ScrollBar.vertical: UI.MaterialScrollBar {
                             objectName: "settingsScrollBar"
                         }
                         ColumnLayout {
                             id: settingsColumn
-                            x: 22; y: 22; width: controlsFlick.width - 44; spacing: 12
+                            x: settingsPanel.contentInset; y: 18
+                            width: controlsFlick.width - settingsPanel.contentInset * 2; spacing: 10
                             ColumnLayout {
-                                spacing: 5
-                                Text { text: window.t("settingsTitle"); color: Theme.onSurface; font.pixelSize: 20; font.bold: true }
-                                Rectangle { Layout.preferredWidth: 34; Layout.preferredHeight: 3; radius: 2; color: Theme.primary }
+                                spacing: 3
+                                Text {
+                                    text: window.t("settingsTitle")
+                                    color: Theme.onSurface
+                                    font.pixelSize: 16; font.bold: true
+                                    lineHeight: 20; lineHeightMode: Text.FixedHeight
+                                }
+                                Rectangle { Layout.preferredWidth: 28; Layout.preferredHeight: 2; radius: 1; color: Theme.primary }
                             }
                             ColumnLayout {
                                 Layout.fillWidth: true
@@ -464,7 +479,7 @@ ApplicationWindow {
                                     label: window.t("capacityLabel")
                                     fieldName: "capacityInput"
                                     minimum: 1
-                                    text: "40"
+                                    text: "48"
                                 }
                                 UI.MaterialNumberSetting {
                                     id: freeInput
@@ -482,20 +497,63 @@ ApplicationWindow {
                                     fieldName: "backpackInput"
                                     text: "48"
                                 }
-                                UI.MaterialButton {
-                                    objectName: "detailsButton"
+                                ColumnLayout {
                                     Layout.fillWidth: true
-                                    Layout.preferredHeight: 34
-                                    text: window.t("viewDataDetails")
-                                    buttonStyle: "accent"
-                                    enabled: window.inputsValid
-                                    onClicked: detailsDialog.open()
+                                    Layout.topMargin: 4
+                                    spacing: 8
+                                    UI.MaterialSliderSetting {
+                                        id: columnsSetting
+                                        Layout.fillWidth: true
+                                        Layout.preferredHeight: 52
+                                        label: window.t("slotsPerRow")
+                                        sliderName: "columnsSlider"
+                                        from: 8; to: 20; value: 8
+                                        minimumLabel: "8"; maximumLabel: "20"
+                                        showValue: true
+                                    }
+                                    UI.MaterialSliderSetting {
+                                        id: widthSetting
+                                        Layout.fillWidth: true
+                                        Layout.preferredHeight: 52
+                                        label: window.t("backpackMaxWidth")
+                                        sliderName: "widthSlider"
+                                        from: 603; to: 1678; value: 603
+                                        minimumLabel: window.t("vanillaWidth")
+                                        maximumLabel: window.t("widestWidth")
+                                    }
                                 }
-                            }
-                            Rectangle {
-                                Layout.fillWidth: true
-                                Layout.preferredHeight: 1
-                                color: Theme.outlineVariant
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Layout.topMargin: 4
+                                    spacing: 8
+                                    UI.MaterialButton {
+                                        objectName: "detailsButton"
+                                        iconName: "details"
+                                        Layout.preferredWidth: settingsPanel.actionWidth
+                                        Layout.preferredHeight: window.compactActionHeight
+                                        leftPadding: 8; rightPadding: 8
+                                        text: window.t("viewDataDetails")
+                                        enabled: window.inputsValid
+                                        onClicked: detailsDialog.open()
+                                    }
+                                    UI.MaterialButton {
+                                        objectName: "autoFitButton"
+                                        iconName: "autoFit"
+                                        Layout.preferredWidth: settingsPanel.actionWidth
+                                        Layout.preferredHeight: window.compactActionHeight
+                                        text: window.t("autoFit")
+                                        buttonStyle: "accent"
+                                        enabled: window.inputsValid
+                                        onClicked: {
+                                            const result = backpackGenerator.autoLayout(
+                                                window.capacity, window.freeSlots, window.backpackCapacity)
+                                            if (result.valid) {
+                                                columnsSetting.value = result.cols
+                                                widthSetting.value = result.maxWidth
+                                            }
+                                        }
+                                    }
+                                }
                             }
                             ColumnLayout {
                                 Layout.fillWidth: true
@@ -534,15 +592,18 @@ ApplicationWindow {
                                     Layout.fillWidth: true
                                     spacing: 8
                                     UI.MaterialButton {
-                                        Layout.preferredWidth: 130
-                                        Layout.minimumWidth: 120
-                                        Layout.preferredHeight: 38
+                                        objectName: "browseGameButton"
+                                        iconName: "browse"
+                                        Layout.preferredWidth: settingsPanel.actionWidth
+                                        Layout.preferredHeight: window.compactActionHeight
                                         text: window.t("chooseManually")
                                         onClicked: gameFileDialog.open()
                                     }
                                     UI.MaterialButton {
-                                        Layout.fillWidth: true
-                                        Layout.preferredHeight: 38
+                                        objectName: "scanGameButton"
+                                        iconName: "scan"
+                                        Layout.preferredWidth: settingsPanel.actionWidth
+                                        Layout.preferredHeight: window.compactActionHeight
                                         buttonStyle: "accent"
                                         enabled: !gameManager.scanning
                                         text: gameManager.scanning ? window.t("scanInProgress") : window.t("scanGame")
@@ -558,8 +619,10 @@ ApplicationWindow {
                                 spacing: 8
                                 Item { Layout.fillWidth: true }
                                 UI.MaterialButton {
-                                    Layout.preferredWidth: 112
-                                    Layout.preferredHeight: 32
+                                    Layout.preferredWidth: settingsPanel.actionWidth
+                                    Layout.preferredHeight: window.compactActionHeight
+                                    objectName: "modsFolderButton"
+                                    iconName: "folder"
                                     enabled: gameManager.selectedGamePath.length > 0
                                     text: window.t("modsFolder")
                                     onClicked: gameManager.openModsFolder()
@@ -568,6 +631,7 @@ ApplicationWindow {
                             UI.MaterialButton {
                                 id: installButton
                                 objectName: "installButton"
+                                iconName: "install"; iconSize: 20
                                 Layout.fillWidth: true; Layout.preferredHeight: 48
                                 buttonStyle: "primary"
                                 enabled: inputsValid && gameManager.selectedGamePath.length > 0
@@ -575,7 +639,8 @@ ApplicationWindow {
                                 font.pixelSize: 15
                                 onClicked: {
                                     const result = backpackGenerator.installMod(
-                                        window.capacity, window.freeSlots, window.backpackCapacity, gameManager.selectedGamePath)
+                                        window.capacity, window.freeSlots, window.backpackCapacity, gameManager.selectedGamePath,
+                                        window.columns, window.maxBackpackWidth)
                                     window.showNotice(window.tf(result.ok ? "statusInstalled" : "statusInstallFailed",
                                                                 [result.ok ? result.path : window.tf(result.messageKey, result.messageArgs)]),
                                                       !result.ok, result.ok ? result.path : "", gameManager.selectedGamePath)
@@ -588,8 +653,8 @@ ApplicationWindow {
                         anchors.left: parent.left
                         anchors.right: parent.right
                         anchors.bottom: parent.bottom
-                        anchors.leftMargin: 20
-                        anchors.rightMargin: 16
+                        anchors.leftMargin: settingsPanel.contentInset
+                        anchors.rightMargin: settingsPanel.contentInset
                         anchors.bottomMargin: 14
                         height: 40
                         spacing: 8
@@ -666,13 +731,17 @@ ApplicationWindow {
                         Item { Layout.fillWidth: true }
                         UI.MaterialButton {
                             id: exportButton
-                            Layout.preferredWidth: 140
-                            Layout.fillHeight: true
+                            objectName: "exportButton"
+                            iconName: "export"
+                            Layout.preferredWidth: settingsPanel.actionWidth
+                            Layout.preferredHeight: window.compactActionHeight
+                            Layout.alignment: Qt.AlignVCenter
                             enabled: inputsValid
                             text: window.t("exportMod")
                             onClicked: {
                                 saveDialog.currentFile = backpackGenerator.suggestedFileUrl(
-                                    window.capacity, window.freeSlots, window.backpackCapacity)
+                                    window.capacity, window.freeSlots, window.backpackCapacity,
+                                    window.columns, window.maxBackpackWidth)
                                 saveDialog.open()
                             }
                         }

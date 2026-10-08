@@ -27,8 +27,9 @@ Rectangle {
         ? Math.min(layoutData.capacity, freeCount) : 0
     readonly property int physicalFreeCount: Math.max(0, freeCount - characterFreeCount)
     readonly property int rows: layoutData.valid ? Math.ceil(totalSlots / layoutData.cols) : 0
-    readonly property int visibleRows: layoutData.valid ? Math.min(rows, layoutData.visibleRows) : 0
-    readonly property int panelHeight: layoutData.valid ? visibleRows * layoutData.cell + 57 : 349
+    // Match the generated game window: the viewport contains complete rows.
+    // Its shared display projection still preserves relative width changes.
+    readonly property real panelHeight: layoutData.valid ? layoutData.height : 349
     radius: 16
     border.color: Theme.darkOutlineVariant
     color: Theme.darkSurface
@@ -93,17 +94,32 @@ Rectangle {
         spacing: 10
         Item {
             id: previewHolder
+            objectName: "previewHolder"
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true
-            property real previewScale: root.layoutData.valid
-                ? Math.min((width - 12) / root.layoutData.width, (height - 12) / root.panelHeight, 0.90) : 0.5
+            // Project all game UI sizes through one shared reference envelope.
+            // Width changes never refit the current backpack to the viewport.
+            // The extra 0.01 covers rounding of the game's 0.75 minimum scale.
+            readonly property real referenceScale: Math.max(0, Math.min(
+                (width - 12) / (1678 * 0.76), (height - 12) / 520))
+            readonly property real previewScale: referenceScale
+                * (root.layoutData.valid ? root.layoutData.stackScale : 1.05)
+            Item {
+                id: previewViewport
+                objectName: "previewViewport"
+                anchors.fill: parent
+                visible: root.characterEnabled && root.layoutData.valid
+                clip: true
             Rectangle {
-                anchors.centerIn: parent
+                id: inventoryWindow
+                objectName: "inventoryWindow"
+                x: Math.max(6, (previewViewport.width - width * previewHolder.previewScale) / 2)
+                y: Math.max(6, (previewViewport.height - height * previewHolder.previewScale) / 2)
                 width: root.layoutData.valid ? root.layoutData.width : 603
                 height: root.panelHeight
                 scale: previewHolder.previewScale
-                transformOrigin: Item.Center
+                transformOrigin: Item.TopLeft
                 visible: root.characterEnabled && root.layoutData.valid
                 color: "#343637"
                 border.width: 3; border.color: "#0b0d0d"
@@ -133,12 +149,13 @@ Rectangle {
                     anchors.top: gameHeader.bottom; anchors.left: parent.left
                     anchors.topMargin: 3; anchors.leftMargin: 3
                     width: root.layoutData.valid ? root.layoutData.cols * root.layoutData.cell + 13 : 0
-                    height: root.layoutData.valid ? root.visibleRows * root.layoutData.cell : 0
+                    height: root.layoutData.valid ? root.layoutData.viewportHeight : 0
                     cellWidth: root.layoutData.valid ? root.layoutData.cell : 66
                     cellHeight: cellWidth
                     model: root.layoutData.valid ? root.layoutData.cols * root.rows : 0
                     clip: true
                     boundsBehavior: Flickable.StopAtBounds
+                    snapMode: GridView.SnapToRow
                     delegate: Rectangle {
                         required property int index
                         width: previewGrid.cellWidth
@@ -173,9 +190,10 @@ Rectangle {
                     ScrollBar.vertical: UI.MaterialScrollBar {
                         dark: true
                         width: 10
-                        policy: root.rows > root.visibleRows ? ScrollBar.AlwaysOn : ScrollBar.AlwaysOff
+                        policy: root.rows * root.layoutData.cell > previewGrid.height ? ScrollBar.AlwaysOn : ScrollBar.AlwaysOff
                     }
                 }
+            }
             }
             Column {
                 anchors.centerIn: parent

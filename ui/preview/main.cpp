@@ -12,6 +12,11 @@
 #include <QDir>
 #include <QDebug>
 #include <QFile>
+#include <QDomDocument>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJSValue>
+#include <cmath>
 #include "BackpackGenerator.h"
 #include "LocalizationManager.h"
 #include "ui/FocusDismissFilter.h"
@@ -31,6 +36,7 @@ int main(int argc, char **argv) {
     QFont font("Microsoft YaHei UI"); font.setWeight(QFont::Normal); app.setFont(font);
     LocalizationManager localization; localization.setLanguage("zh_CN");
     BackpackGenerator calculator;
+    QScopedPointer<QObject> backend;
     QQmlApplicationEngine engine;
     int warnings = 0;
     QObject::connect(&engine, &QQmlEngine::warnings, [&](const QList<QQmlError> &errors) {
@@ -39,13 +45,13 @@ int main(int argc, char **argv) {
     engine.rootContext()->setContextProperty("previewCalculator", &calculator);
     engine.rootContext()->setContextProperty("previewLocalization", &localization);
     QQmlComponent mocks(&engine, QUrl::fromLocalFile(QStringLiteral(UI_SOURCE_DIR "/ui/preview/PreviewBackend.qml")));
-    QScopedPointer<QObject> backend(mocks.create());
+    backend.reset(mocks.create());
     require(!backend.isNull(), "Preview backend failed");
     engine.rootContext()->setContextProperty("backpackGenerator", backend->property("generator").value<QObject *>());
     engine.rootContext()->setContextProperty("gameManager", backend->property("games").value<QObject *>());
     engine.rootContext()->setContextProperty("localization", &localization);
     engine.rootContext()->setContextProperty("uiFontFamily", "Microsoft YaHei UI");
-    engine.rootContext()->setContextProperty("appVersion", "1.3.0");
+    engine.rootContext()->setContextProperty("appVersion", "1.4.0");
     engine.load(QUrl::fromLocalFile(QStringLiteral(UI_SOURCE_DIR "/Main.qml")));
     require(!engine.rootObjects().isEmpty(), "UI failed to load");
     auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
@@ -56,6 +62,244 @@ int main(int argc, char **argv) {
         if (auto *field=window->findChild<QQuickItem *>(name)) fields.append(field);
     window->installEventFilter(new FocusDismissFilter(window, fields));
     const QStringList args=app.arguments();
+    if (args.contains("--v140")) {
+        const int outputArg=args.indexOf("--v140")+1;
+        require(outputArg<args.size(),"v1.4 verification output directory missing");
+        const QString output=args[outputArg];
+        require(QDir().mkpath(output),"cannot create verification output");
+        auto item=[&](const char *name) {
+            auto *value=window->findChild<QQuickItem *>(name);
+            require(value,name); return value;
+        };
+        auto *columns=item("columnsSlider"), *width=item("widthSlider");
+        auto *preview=item("backpackPreview"), *inventory=item("inventoryWindow");
+        auto *viewport=item("previewViewport"), *grid=item("previewGrid"), *holder=item("previewHolder");
+        auto settle=[&]() { QTest::qWait(180); window->grabWindow(); QTest::qWait(120); };
+        auto capture=[&](const char *name) {
+            settle(); require(window->grabWindow().save(output+"/"+name+".png"),"screenshot failed");
+        };
+        window->resize(1200,700); settle();
+        require(window->property("capacity").toInt()==48 && window->property("freeSlots").toInt()==32
+                && window->property("backpackCapacity").toInt()==48,"defaults are not 48/32/48");
+        require(columns->property("value").toInt()==8 && width->property("value").toInt()==603,
+                "default layout is not eight columns at vanilla width");
+        require(inventory->width()==603 && inventory->property("scale").toReal()>0,
+                "vanilla preview width or projection incorrect");
+        const qreal referenceScale=holder->property("referenceScale").toReal();
+        const qreal vanillaDisplayWidth=inventory->width()*inventory->property("scale").toReal();
+        capture("01-default");
+        if (args.contains("--whole-rows")) {
+            for (int cols : {8,12,20}) for (int maxWidth : {603,858,1678}) {
+                columns->setProperty("value",cols); width->setProperty("value",maxWidth);
+                preview->setProperty("physicalEnabled",false); settle();
+                const auto expected=calculator.layout(48,32,48,cols,maxWidth);
+                require(grid->height()==expected.value("viewportHeight").toInt()
+                        && inventory->height()==expected.value("height").toInt(),
+                        "preview differs from generated viewport geometry");
+                require(qAbs(std::remainder(grid->height(),grid->property("cellHeight").toReal()))<0.001,
+                        "viewport clips part of a row");
+                for (bool gameMode : {false,true}) {
+                    preview->setProperty("gameMode",gameMode);
+                    preview->setProperty("physicalEnabled",true); settle();
+                    require(grid->height()==expected.value("viewportHeight").toInt()
+                            && preview->property("totalSlots").toInt()==96,
+                            "equipping a backpack changes viewport or loses slots");
+                    preview->setProperty("physicalEnabled",false);
+                }
+            }
+            preview->setProperty("gameMode",false);
+            columns->setProperty("value",8); width->setProperty("value",1678); settle();
+            const auto expected=calculator.layout(48,32,48,8,1678);
+            require(expected.value("cell").toInt()==207 && expected.value("visibleRows").toInt()==3
+                    && grid->height()==621 && inventory->height()==678,
+                    "eight-column widest regression is not three complete rows");
+            const auto vanilla=calculator.layout(48,32,48,8,603);
+            require(expected.value("height").toReal()*expected.value("stackScale").toReal()
+                    >=vanilla.value("height").toReal()*vanilla.value("stackScale").toReal(),
+                    "widest panel is shorter than the vanilla-width panel");
+            grid->setProperty("contentY",0); capture("08-widest-complete-rows");
+            grid->setProperty("contentY",grid->property("contentHeight").toReal()-grid->height()); settle();
+            auto *content=grid->property("contentItem").value<QQuickItem *>();
+            require(content,"inventory content item missing");
+            QQuickItem *lastSlot=nullptr;
+            for (auto *child : content->childItems())
+                if (child->property("index").isValid() && child->property("index").toInt()==47) lastSlot=child;
+            require(lastSlot,"last character slot cannot be reached by scrolling");
+            const QPointF bottom=lastSlot->mapToItem(grid,QPointF(0,lastSlot->height()));
+            require(lastSlot->mapToItem(grid,QPointF()).y()>=-0.1 && bottom.y()<=grid->height()+0.1,
+                    "last row is clipped at the bottom");
+            capture("09-widest-last-row");
+            const QString gameRoot=output+"/fake-game"; require(QDir().mkpath(gameRoot),"cannot create fake game");
+            QFile exe(gameRoot+"/7DaysToDie.exe"); require(exe.open(QIODevice::WriteOnly),"cannot create fake executable"); exe.close();
+            const auto installed=calculator.installMod(48,32,48,exe.fileName(),8,1678);
+            require(installed.value("ok").toBool(),"regression mod generation failed");
+            QFile file(installed.value("path").toString()+"/Config/XUi_InGame/windows.xml");
+            require(file.open(QIODevice::ReadOnly),"regression windows.xml missing");
+            const QByteArray xml=file.readAll(); QDomDocument document; require(bool(document.setContent(xml)),"invalid XML");
+            bool sawViewport=false;
+            const auto attributes=document.elementsByTagName("setattribute");
+            for(int i=0;i<attributes.size();++i) {
+                const auto entry=attributes.at(i).toElement();
+                if(entry.attribute("xpath").contains("window[@name='windowBackpack']")
+                   && entry.attribute("xpath").endsWith("/scrollview") && entry.attribute("name")=="height") {
+                    sawViewport=true; require(entry.text()=="621","game scroll viewport does not match preview");
+                }
+            }
+            require(sawViewport,"game viewport height patch missing");
+            const auto saved=calculator.saveZip(48,32,48,QUrl::fromLocalFile(output+"/whole-rows-mod.zip"),8,1678);
+            require(saved.value("ok").toBool(),"regression ZIP generation failed");
+            QFile zip(saved.value("path").toString()); require(zip.open(QIODevice::ReadOnly) && zip.readAll().contains(xml),
+                    "installed and exported viewport heights disagree");
+            require(warnings==0,"QML warnings during complete-row check");
+            QFile report(output+"/whole-rows-check.json"); require(report.open(QIODevice::WriteOnly),"cannot save regression report");
+            report.write(QJsonDocument(QJsonObject{{"passed",true},{"visibleRows",3},{"cellSize",207},
+                         {"viewportHeight",621},{"windowHeight",678},{"lastSlotReachable",true},{"installAndExportMatch",true},
+                         {"qmlWarnings",warnings}}).toJson());
+            return 0;
+        }
+        if (args.contains("--alignment")) {
+            localization.setLanguage("en_US"); capture("02-english");
+            window->resize(760,520); capture("03-english-small");
+            return 0;
+        }
+        if (args.contains("--auto-fit")) {
+            // Check real button clicks against the original automatic-layout
+            // examples, starting with deliberately different slider settings.
+            const int examples[][3]={{48,8,603},{50,10,771},{200,20,1668},{250,18,1485}};
+            for (const auto &example : examples) {
+                item("capacityInput")->setProperty("text",QString::number(example[0]));
+                columns->setProperty("value",20); width->setProperty("value",1678); settle();
+                auto *button=item("autoFitButton");
+                const QPoint point=button->mapToScene(QPointF(button->width()/2,button->height()/2)).toPoint();
+                QTest::mouseClick(window,Qt::LeftButton,Qt::NoModifier,point); settle();
+                require(window->property("columns").toInt()==example[1]
+                        && window->property("maxBackpackWidth").toInt()==example[2],
+                        "auto fit did not restore the original layout and synchronize both sliders");
+                require(inventory->width()==example[2],"auto fit preview disagrees with slider width");
+            }
+            for (const char *name : {"detailsButton","autoFitButton","browseGameButton","scanGameButton"})
+                require(item(name)->height()==34,"action buttons have inconsistent heights");
+            require(!calculator.autoLayout(0,0,48).value("valid").toBool(),"invalid auto fit accepted");
+            item("capacityInput")->setProperty("text",""); settle();
+            require(!item("autoFitButton")->isEnabled(),"auto fit enabled with invalid input");
+            item("capacityInput")->setProperty("text","48");
+            columns->setProperty("value",8); width->setProperty("value",603);
+            capture("02-auto-fit-chinese");
+            localization.setLanguage("en_US"); capture("03-auto-fit-english");
+            require(warnings==0,"QML warnings while using auto fit");
+            QFile report(output+"/auto-fit-check.json"); require(report.open(QIODevice::WriteOnly),"cannot save auto fit report");
+            report.write(QJsonDocument(QJsonObject{{"passed",true},{"originalAlgorithmRestored",true},
+                         {"slidersSynchronized",true},{"buttonHeight",34},{"qmlWarnings",warnings}}).toJson());
+            return 0;
+        }
+        if (args.contains("--snapshot-only")) return 0;
+        require(!item("settingsScrollBar")->isVisible(),"settings need unnecessary scrolling at default desktop size");
+        const auto perk=calculator.layout(48,32,48).value("perk");
+        for(int capacity : {1,48,250,5000}) for(int cols : {8,9,15,20}) for(int maxWidth : {603,858,1678}) {
+            const auto data=calculator.layout(capacity,qMin(32,capacity),48,cols,maxWidth);
+            require(data.value("valid").toBool() && data.value("cols").toInt()==cols,
+                    "requested column count was changed");
+            require(data.value("width").toInt()<=maxWidth && data.value("cell").toInt()>0,
+                    "inventory exceeds chosen maximum width");
+            require(data.value("gridRows").toInt()*cols>=capacity+48+40,
+                    "equipped items have no grid space");
+        }
+        require(!calculator.layout(48,32,48,7,603).value("valid").toBool()
+                && !calculator.layout(48,32,48,21,603).value("valid").toBool()
+                && !calculator.layout(48,32,48,8,602).value("valid").toBool()
+                && !calculator.layout(48,32,48,8,1679).value("valid").toBool(),"layout limits not enforced");
+        // Exercise the real slider interaction, including snapping at both ends.
+        auto dragToEnd=[&](QQuickItem *slider) {
+            const qreal padding=slider->property("leftPadding").toReal();
+            const QPoint start=slider->mapToScene(QPointF(padding+7,slider->height()/2)).toPoint();
+            const QPoint end=slider->mapToScene(QPointF(slider->width()-padding-1,slider->height()/2)).toPoint();
+            QTest::mousePress(window,Qt::LeftButton,Qt::NoModifier,start);
+            QTest::mouseMove(window,end,80); QTest::mouseRelease(window,Qt::LeftButton,Qt::NoModifier,end);
+            settle();
+        };
+        dragToEnd(columns); require(columns->property("value").toInt()==20,"column slider does not drag to twenty");
+        require(grid->property("cellWidth").toInt()==28,"narrow twenty-column preview is incorrect");
+        capture("02-twenty-vanilla");
+        dragToEnd(width); require(width->property("value").toInt()==1678,"width slider does not drag to widest");
+        require(inventory->width()>1600 && inventory->width()<=1678
+                && qAbs(holder->property("referenceScale").toReal()-referenceScale)<0.001,
+                "width slider changed the shared projection");
+        require(inventory->width()*inventory->property("scale").toReal()>vanillaDisplayWidth,
+                "widest backpack is not visibly wider than vanilla");
+        const QVariant current=window->property("currentLayout");
+        const QVariantMap currentData=current.metaType()==QMetaType::fromType<QJSValue>()
+            ? current.value<QJSValue>().toVariant().toMap() : current.toMap();
+        require(currentData.value("perk")==perk,
+                "layout sliders changed carry allowance");
+        capture("03-widest");
+        for(int cols : {8,15,20}) for(int maxWidth : {603,858,1200,1678}) {
+            columns->setProperty("value",cols); width->setProperty("value",maxWidth); settle();
+            const qreal scale=inventory->property("scale").toReal();
+            require(qAbs(holder->property("referenceScale").toReal()-referenceScale)<0.001,
+                    "settings changed the shared projection");
+            require(inventory->x()>=0 && inventory->x()+inventory->width()*scale<=viewport->width()+0.1
+                    && inventory->y()>=0 && inventory->y()+inventory->height()*scale<=viewport->height()+0.1,
+                    "backpack frame is clipped");
+            require(qAbs(std::remainder(grid->height(),grid->property("cellHeight").toReal()))<0.001,
+                    "viewport clips part of a row");
+        }
+        columns->setProperty("value",8); width->setProperty("value",1678);
+        capture("04-eight-columns-widest");
+        preview->setProperty("physicalEnabled",true); preview->setProperty("perkEnabled",true);
+        preview->setProperty("perkLevel",1);
+        for(bool gameMode : {false,true}) {
+            preview->setProperty("gameMode",gameMode);
+            require(preview->property("totalSlots").toInt()==96 && preview->property("freeCount").toInt()==44,
+                    "layout change broke preview capacity");
+        }
+        preview->setProperty("gameMode",false);
+        columns->setProperty("value",15); width->setProperty("value",858);
+        capture("05-marked-preview");
+        const QRectF columnsBounds(columns->mapToScene(QPointF()),columns->size());
+        localization.setLanguage("en_US"); settle();
+        require(QRectF(columns->mapToScene(QPointF()),columns->size())==columnsBounds,
+                "English slider placement differs from Chinese");
+        capture("06-english");
+        window->resize(760,520); settle();
+        const qreal smallScale=inventory->property("scale").toReal();
+        require(inventory->x()+inventory->width()*smallScale<=viewport->width()+0.1
+                && inventory->y()+inventory->height()*smallScale<=viewport->height()+0.1,
+                "small window clips the backpack frame");
+        require(item("controlsFlick")->property("contentHeight").toReal()>item("controlsFlick")->height(),
+                "small window cannot reach settings");
+        capture("07-small-window");
+        const QString gameRoot=output+"/fake-game";
+        require(QDir().mkpath(gameRoot),"cannot create fake game");
+        QFile exe(gameRoot+"/7DaysToDie.exe"); require(exe.open(QIODevice::WriteOnly),"cannot create test executable"); exe.close();
+        const auto result=calculator.installMod(250,125,48,exe.fileName(),15,858);
+        require(result.value("ok").toBool(),"mod install failed");
+        QFile xml(result.value("path").toString()+"/Config/XUi_InGame/windows.xml");
+        require(xml.open(QIODevice::ReadOnly),"generated windows.xml missing");
+        const QByteArray generatedXml=xml.readAll(); QDomDocument document;
+        require(bool(document.setContent(generatedXml)),"generated windows.xml invalid");
+        const auto selected=calculator.layout(250,125,48,15,858);
+        bool sawCols=false,sawWidth=false,sawRows=false;
+        const auto sets=document.elementsByTagName("set");
+        for(int i=0;i<sets.size();++i) {
+            const auto entry=sets.at(i).toElement(); const QString xpath=entry.attribute("xpath");
+            if(!xpath.contains("window[@name='windowBackpack']")) continue;
+            if(xpath.endsWith("grid[@name='inventory']/@cols")) {sawCols=true; require(entry.text()=="15","installed columns incorrect");}
+            if(xpath.endsWith("window[@name='windowBackpack']/@width")) {sawWidth=true; require(entry.text().toInt()==selected.value("width").toInt(),"installed width incorrect");}
+            if(xpath.endsWith("grid[@name='inventory']/@rows")) {sawRows=true; require(entry.text().toInt()==selected.value("gridRows").toInt(),"installed scroll rows incorrect");}
+        }
+        require(sawCols && sawWidth && sawRows,"generated XML lacks layout settings");
+        const auto saved=calculator.saveZip(250,125,48,QUrl::fromLocalFile(output+"/layout-mod.zip"),15,858);
+        require(saved.value("ok").toBool(),"mod export failed");
+        QFile zip(saved.value("path").toString()); require(zip.open(QIODevice::ReadOnly),"export missing");
+        require(zip.readAll().contains(generatedXml),"export and installation disagree");
+        require(warnings==0,"QML warnings during v1.4 verification");
+        QFile report(output+"/verification.json"); require(report.open(QIODevice::WriteOnly),"report write failed");
+        report.write(QJsonDocument(QJsonObject{{"passed",true},{"defaults","48/32/48, 8 columns, vanilla width"},
+                     {"sharedPreviewProjection",true},{"completeRows",true},
+                     {"fullWidthRangeVisible",true},{"maximumWidth",1678},{"installAndExportMatch",true},
+                     {"qmlWarnings",warnings}}).toJson());
+        return 0;
+    }
     if (args.contains("--readme")) {
         window->resize(1200,700);
         auto findItem=[&](const char *name) {
@@ -99,6 +343,7 @@ int main(int argc, char **argv) {
             findItem("capacityInput")->setProperty("text","200");
             findItem("freeInput")->setProperty("text","50");
             findItem("backpackInput")->setProperty("text","200");
+            QMetaObject::invokeMethod(findItem("autoFitButton"),"clicked");
             preview->setProperty("physicalEnabled",true);
             preview->setProperty("perkEnabled",true);
             preview->setProperty("perkLevel",3);
@@ -106,17 +351,27 @@ int main(int argc, char **argv) {
             preview->setProperty("backpackQuality",5);
             preview->setProperty("gameMode",false);
             capture("main");
+            const int mainColumns=findItem("columnsSlider")->property("value").toInt();
+            findItem("widthSlider")->setProperty("value",603);
+            capture("layout-vanilla-width");
+            findItem("widthSlider")->setProperty("value",1678);
+            capture("layout-widest");
+            require(findItem("columnsSlider")->property("value").toInt()==mainColumns,
+                    "width-only comparison changed column count");
             const QRectF previewArea=bounds(preview->parentItem()).adjusted(-1,-1,1,1);
             capture("preview-mode",previewArea);
             preview->setProperty("gameMode",true);
             capture("game-mode",previewArea);
             preview->setProperty("gameMode",false);
-            findItem("capacityInput")->setProperty("text","40");
+            findItem("capacityInput")->setProperty("text","48");
             findItem("freeInput")->setProperty("text","32");
             findItem("backpackInput")->setProperty("text","48");
             preview->setProperty("physicalEnabled",false);
             preview->setProperty("perkEnabled",false);
+            findItem("columnsSlider")->setProperty("value",8);
+            findItem("widthSlider")->setProperty("value",603);
             QTest::qWait(300);
+            capture("defaults");
             // Capture the actual controls, including labels, at their rendered positions.
             const QRectF settingsArea=bounds(findItem("capacityInput")->parentItem()->parentItem())
                     .united(bounds(findItem("detailsButton"))).adjusted(-10,-10,10,10);

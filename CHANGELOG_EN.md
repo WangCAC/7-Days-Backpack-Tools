@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.4.0 (2026-10-08)
+
+- **New backpack layout settings**: Adjust slots per row from 8 to 20 and backpack width from vanilla to widest. Both installed and exported mods use these settings.
+- **New “Auto fit” button**: Automatically recommends slots per row and backpack width based on the current capacity, updating both sliders and the preview to reduce manual adjustments.
+- **Improved backpack width preview**: Clearly see the size difference between backpack widths. The entire backpack window remains visible even at the widest setting, making it easier to choose a suitable layout in advance.
+- **Improved button layout**: Buttons now share consistent column widths and alignment, with adjusted heights and spacing to leave more room at the bottom.
+- **New function icons**: Button icons make functions easier to recognize, and English button text fits better.
+- **Updated defaults and labels**: The defaults are 48 character slots, 32 starting unencumbered slots, 48 maximum equipped backpack slots, 8 slots per row, and vanilla width. “Large backpack · L6” is now “Max backpack slots,” and “Maximum backpack UI width” is now “Backpack width.”
+
 ## v1.3.0 (2026-10-03)
 
 - **Customize equipped backpack capacity**: You can set the capacity of a large quality-6 backpack. The tool adjusts small, medium, and other quality levels together to suit your playstyle.

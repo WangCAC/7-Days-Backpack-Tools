@@ -3,15 +3,18 @@ import QtQuick
 // Only loaded by the development preview. No game files are read or written.
 QtObject {
     property QtObject generator: QtObject {
-        function layout(capacity, freeSlots, backpackCapacity) {
-            return previewCalculator.layout(capacity, freeSlots, backpackCapacity)
+        function layout(capacity, freeSlots, backpackCapacity, columns, maxWidth) {
+            return previewCalculator.layout(capacity, freeSlots, backpackCapacity, columns, maxWidth)
         }
-        function suggestedFileUrl(capacity, freeSlots, backpackCapacity) { return "file:///C:/Preview/backpack.zip" }
-        function installMod(capacity, freeSlots, backpackCapacity, gamePath) {
+        function autoLayout(capacity, freeSlots, backpackCapacity) {
+            return previewCalculator.autoLayout(capacity, freeSlots, backpackCapacity)
+        }
+        function suggestedFileUrl(capacity, freeSlots, backpackCapacity, columns, maxWidth) { return "file:///C:/Preview/backpack.zip" }
+        function installMod(capacity, freeSlots, backpackCapacity, gamePath, columns, maxWidth) {
             return {ok: true, path: "C:/Games/7 Days To Die/Mods/wangcac-" + capacity + "BigBackpack" + freeSlots + "WB"}
         }
         function removeOtherGeneratedMods(gamePath, installedPath) { return {ok: true, removed: 0} }
-        function saveZip(capacity, freeSlots, backpackCapacity, destination) { return {ok: true, path: "C:/Preview/backpack.zip"} }
+        function saveZip(capacity, freeSlots, backpackCapacity, destination, columns, maxWidth) { return {ok: true, path: "C:/Preview/backpack.zip"} }
     }
     property QtObject games: QtObject {
         property var gamePaths: ["C:/Games/7 Days To Die/7DaysToDie.exe", "D:/SteamLibrary/steamapps/common/7 Days To Die/7DaysToDie.exe"]

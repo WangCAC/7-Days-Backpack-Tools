@@ -9,7 +9,7 @@
   <h1>7 Days to Die Custom Backpack Capacity Tool</h1>
 
   <p>Customize character and equipped backpack capacity, preview equipment and Pack Mule effects, then generate and install your mod in one click.</p>
-  <p><strong>v1.3.0</strong> · Windows · Supports 7 Days to Die V3.3 and later</p>
+  <p><strong>v1.4.0</strong> · Windows 64-bit · Supports 7 Days to Die V3.3 and later</p>
 
   <p>
     <a href="#about-the-project">About</a> ·
@@ -20,7 +20,7 @@
   </p>
 </div>
 
-![v1.3.0 English interface](assets/screenshots/en/main.png)
+![v1.4.0 English interface](assets/screenshots/en/main.png)
 
 *The screenshot shows an example setup. Adjust the capacity to suit your playstyle.*
 
@@ -28,11 +28,13 @@
 
 Backpack mods are practically essential for many 7 Days to Die players. But after a game update, finding, downloading, and installing a suitable mod again takes time. Ready-made mods may not offer the capacity settings every player wants.
 
-This tool brings configuration, preview, and installation together. Set character backpack slots, starting unencumbered slots, and equipped backpack capacity, then choose a backpack type, quality, and Pack Mule rank to preview the result. Once you are happy with the setup, install it directly into the game's `Mods` folder or export a ZIP to share with friends.
+This tool brings configuration, preview, and installation together. Set character slots, starting unencumbered slots, maximum equipped backpack capacity, and layout, then choose a backpack type, quality, and Pack Mule rank to preview the result. Once you are happy with the setup, install it directly into the game's `Mods` folder or export a ZIP to share with friends.
 
 ## Features
 
-- **Flexible configuration**: Set character slots, starting unencumbered slots, and large quality-6 backpack capacity. Other backpack types and qualities adjust with it.
+- **Flexible configuration**: Set character slots, starting unencumbered slots, and maximum equipped backpack capacity (large quality-6 backpack). Other backpack types and qualities adjust with it.
+- **Adjustable layout**: Choose 8–20 slots per row and a backpack width from vanilla to widest. Installed and exported mods use your selected layout.
+- **One-click Auto fit**: Get a recommended row size and width for the current capacity, with both sliders and the preview updated automatically.
 - **Live preview**: Choose a backpack type, quality, and Pack Mule rank to see available slots and encumbered areas without repeatedly launching the game.
 - **Two viewing modes**: Game mode simulates the in-game appearance. Preview mode marks the extra slots provided by an equipped backpack.
 - **Capacity details**: Compare Pack Mule bonuses and the additional slots provided by every quality of small, medium, and large backpacks in one place.
@@ -46,17 +48,23 @@ This tool brings configuration, preview, and installation together. Set characte
 
 ### Get the App
 
-Download the Windows single-file `.exe` from the [latest release](https://github.com/WangCAC/7-Days-Backpack-Tools/releases/latest) and run it.
+Download the Windows single-file `.exe` from the [latest release](https://github.com/WangCAC/7-Days-Backpack-Tools/releases/latest) and run it. A portable ZIP is also available: extract the entire folder and run `7DaysBackpackTools.exe`.
 
-The defaults are **40 character slots**, **32 starting unencumbered slots**, and **48 slots for a large quality-6 backpack**.
+The defaults are **48 character slots**, **32 starting unencumbered slots**, **48 maximum equipped backpack slots**, **8 slots per row**, and **vanilla width**.
 
 ### Configure and Install
 
-1. Set the **character backpack slots**, **starting unencumbered slots**, and **large quality-6 backpack capacity**. Other backpack types and qualities adjust automatically. Starting unencumbered slots cannot exceed the character backpack capacity.
+1. Set **Character slots**, **Starting free slots**, and **Max backpack slots**. Max backpack slots refers to the large quality-6 equipped backpack; other backpack types and qualities adjust automatically. Starting free slots cannot exceed the character slot count.
+
+   Adjust **Slots per row** and **Backpack width** using the sliders, or click **Auto fit** for a recommended layout. You can still fine-tune the sliders afterward.
 
    ![Character and equipped backpack capacity settings](assets/screenshots/en/settings.png)
 
-2. Check the live preview on the left. Enable **Backpack** and **Pack Mule** below it, then choose a backpack type, quality, and skill rank to preview their effects. Click **View capacity details** to compare the additional slots at each level.
+   | Same slots per row: vanilla width | Widest |
+   | --- | --- |
+   | ![Vanilla width preview](assets/screenshots/en/layout-vanilla-width.png) | ![Widest preview](assets/screenshots/en/layout-widest.png) |
+
+2. Check the live preview on the left. Enable **Backpack** and **Pack Mule** below it, then choose a backpack type, quality, and skill rank to preview their effects. Click **View details** to compare the additional slots at each level.
 
    | Preview mode: marks the extra slots from an equipped backpack | Game mode: simulates the in-game appearance |
    | --- | --- |
@@ -102,4 +110,4 @@ If you find a problem or have a feature suggestion, please open an [Issue](https
 
 ## License and Acknowledgments
 
-Developed by [WangCAC](https://github.com/WangCAC) and licensed under the [MIT License](LICENSE). The README section structure was inspired by [Best-README-Template](https://github.com/othneildrew/Best-README-Template).
+Developed by [WangCAC](https://github.com/WangCAC) and licensed under the [MIT License](LICENSE). Button icons are from [Lucide](https://lucide.dev/); see the [Lucide license](assets/lucide-LICENSE.txt). The README section structure was inspired by [Best-README-Template](https://github.com/othneildrew/Best-README-Template).
