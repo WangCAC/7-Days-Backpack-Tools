@@ -14,14 +14,20 @@ public:
     explicit BackpackGenerator(QObject *parent = nullptr);
 
     Q_INVOKABLE QVariantMap layout(int capacity, int freeSlots, int backpackCapacity,
-                                  int columns = 8, int maxWidth = 603) const;
-    Q_INVOKABLE QVariantMap autoLayout(int capacity, int freeSlots, int backpackCapacity) const;
+                                  int columns = 8, int maxWidth = 603,
+                                  const QVariantMap &appearance = QVariantMap()) const;
+    Q_INVOKABLE QVariantMap autoLayout(int capacity, int freeSlots, int backpackCapacity,
+                                      int columns, int maxWidth, int mode,
+                                      const QVariantMap &currentLayout, int displayedCapacity = 0) const;
     Q_INVOKABLE QUrl suggestedFileUrl(int capacity, int freeSlots, int backpackCapacity,
-                                     int columns = 8, int maxWidth = 603) const;
+                                     int columns = 8, int maxWidth = 603,
+                                     const QVariantMap &appearance = QVariantMap()) const;
     Q_INVOKABLE QVariantMap saveZip(int capacity, int freeSlots, int backpackCapacity, const QUrl &destination,
-                                  int columns = 8, int maxWidth = 603) const;
+                                  int columns = 8, int maxWidth = 603,
+                                  const QVariantMap &appearance = QVariantMap()) const;
     Q_INVOKABLE QVariantMap installMod(int capacity, int freeSlots, int backpackCapacity, const QString &gameProgramPath,
-                                     int columns = 8, int maxWidth = 603) const;
+                                     int columns = 8, int maxWidth = 603,
+                                     const QVariantMap &appearance = QVariantMap()) const;
     Q_INVOKABLE QVariantMap removeOtherGeneratedMods(const QString &gameProgramPath,
                                                     const QString &installedModPath) const;
 
@@ -44,6 +50,11 @@ private:
         int height = 0;
         int contentHeight = 0;
         int viewportHeight = 0;
+        int edgeMode = -1;
+        int queueCols = 4;
+        int queueRows = 1;
+        int queueX = 94;
+        int queueHeight = 91;
         int lootCols = 10;
         int lootRows = 0;
         int lootContentHeight = 0;
@@ -56,7 +67,9 @@ private:
         QList<QList<int>> backpacks;
     };
 
-    static Layout calculate(int capacity, int freeSlots, int backpackCapacity, int columns, int maxWidth);
+    static Layout calculate(int capacity, int freeSlots, int backpackCapacity, int columns, int maxWidth,
+                            const QVariantMap &appearance = QVariantMap());
+    static QString folderName(const Layout &layout);
     QString patchXml(const QString &relativePath, const QString &source,
                      const Layout &layout, QString *error) const;
     QString modInfo(const Layout &layout, const QString &folder) const;

@@ -28,7 +28,7 @@ int main(int argc, char *argv[])
     QQuickStyle::setStyle(QStringLiteral("Basic"));
     QCoreApplication::setOrganizationName("wangcac");
     QCoreApplication::setApplicationName("BackpackTools");
-    QCoreApplication::setApplicationVersion(QStringLiteral("1.4.0"));
+    QCoreApplication::setApplicationVersion(QStringLiteral("1.4.1"));
     const QStringList installedFonts = QFontDatabase::families();
     QString uiFontFamily;
     for (const QString &candidate : {QStringLiteral("Source Han Sans SC"),

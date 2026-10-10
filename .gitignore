@@ -81,3 +81,17 @@ CMakeLists.txt.user*
 .rcc/
 .uic/
 /build*/
+
+# Local research, design notes, publishing materials and retired helpers
+/docs/
+/promo/
+/packaging/README.md
+/ui/README.md
+/build-single-file.cmd
+/build-single-file.ps1
+/set-sfx-icon.ps1
+/ui/preview/start-preview.cmd
+
+# Unused documentation screenshots retained locally
+/assets/screenshots/en/defaults.png
+/assets/screenshots/zh-cn/defaults.png

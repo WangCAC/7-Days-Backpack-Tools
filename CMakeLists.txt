@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(BackpackTools VERSION 1.4.0 LANGUAGES CXX)
+project(BackpackTools VERSION 1.4.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -59,6 +59,8 @@ qt_add_qml_module(appBackpackTools
         ui/Ripple.qml
         ui/MaterialButton.qml
         ui/MaterialCheckBox.qml
+        ui/MaterialRadioButton.qml
+        EdgeFitDialog.qml
         ui/MaterialNumberSetting.qml
         ui/MaterialSliderSetting.qml
         ui/MaterialScrollBar.qml

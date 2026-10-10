@@ -16,6 +16,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJSValue>
+#include <QColor>
 #include <cmath>
 #include "BackpackGenerator.h"
 #include "LocalizationManager.h"
@@ -51,7 +52,7 @@ int main(int argc, char **argv) {
     engine.rootContext()->setContextProperty("gameManager", backend->property("games").value<QObject *>());
     engine.rootContext()->setContextProperty("localization", &localization);
     engine.rootContext()->setContextProperty("uiFontFamily", "Microsoft YaHei UI");
-    engine.rootContext()->setContextProperty("appVersion", "1.4.0");
+    engine.rootContext()->setContextProperty("appVersion", "1.4.1");
     engine.load(QUrl::fromLocalFile(QStringLiteral(UI_SOURCE_DIR "/Main.qml")));
     require(!engine.rootObjects().isEmpty(), "UI failed to load");
     auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
@@ -88,6 +89,121 @@ int main(int argc, char **argv) {
         const qreal referenceScale=holder->property("referenceScale").toReal();
         const qreal vanillaDisplayWidth=inventory->width()*inventory->property("scale").toReal();
         capture("01-default");
+        if (args.contains("--v141") || args.contains("--auto-fit")) {
+            // Two empty rows plus a partial row: normal keeps the two rows,
+            // strong keeps only occupied rows, keep-height preserves all space.
+            auto snapshot=calculator.layout(48,32,144,16,1305);
+            snapshot["height"]=471; snapshot["viewportHeight"]=419;
+            const int viewHeights[3]={400,240,419}, windowHeights[3]={452,292,471};
+            for (int mode=0;mode<3;++mode) {
+                const auto fit=calculator.autoLayout(48,32,144,16,1305,mode,snapshot,48);
+                require(fit.value("valid").toBool(),"edge fit rejected valid snapshot");
+                require(fit.value("cols").toInt()==16 && fit.value("cell").toInt()==80
+                        && fit.value("width").toInt()==1299 && fit.value("stackScale")==snapshot.value("stackScale"),
+                        "edge fitting changed chosen columns or displayed cell size");
+                require(fit.value("viewportHeight").toInt()==viewHeights[mode]
+                        && fit.value("height").toInt()==windowHeights[mode],"edge policy handled empty space incorrectly");
+                require(fit.value("maxCapacity").toInt()==232 && fit.value("perk")==snapshot.value("perk")
+                        && fit.value("backpacks")==snapshot.value("backpacks"),"fitting changed capacity or skills");
+                const auto options=fit.value("appearance").toMap();
+                const auto reapplied=calculator.layout(48,32,144,16,fit.value("maxWidth").toInt(),options);
+                require(reapplied.value("height")==fit.value("height") && reapplied.value("cell")==fit.value("cell"),
+                        "reapplying fitted slider value changed geometry");
+                const QString gameRoot=output+"/fake-game"; require(QDir().mkpath(gameRoot),"fake game directory");
+                QFile exe(gameRoot+"/7DaysToDie.exe"); require(exe.open(QIODevice::WriteOnly),"fake game exe"); exe.close();
+                const auto installed=calculator.installMod(48,32,144,exe.fileName(),16,1299,options);
+                require(installed.value("ok").toBool(),"fitted install failed");
+                QFile file(installed.value("path").toString()+"/Config/XUi_InGame/windows.xml");
+                require(file.open(QIODevice::ReadOnly),"fitted XML missing"); const QByteArray xml=file.readAll();
+                QDomDocument document; require(bool(document.setContent(xml)),"fitted XML invalid");
+                auto value=[&](const QString &xpath,const QString &attribute=QString()) {
+                    for(auto entry=document.documentElement().firstChildElement();!entry.isNull();entry=entry.nextSiblingElement())
+                        if(entry.attribute("xpath")==xpath && (attribute.isEmpty()?entry.tagName()=="set":entry.attribute("name")==attribute)) return entry.text();
+                    return QString();
+                };
+                const QString bp="/windows/window[@name='windowBackpack']", content=bp+"/rect[@name='content']";
+                require(value(bp+"/@height").toInt()==windowHeights[mode]
+                        && value(content+"/scrollview","height").toInt()==viewHeights[mode]
+                        && value(content+"/scrollview","width")=="1280", "exported edge dimensions disagree");
+                require(value(content+"/defaultscrollbar","pos")=="1283,-3"
+                        && value(content+"/defaultscrollbar","barheight").toInt()==viewHeights[mode],"scrollbar is detached from grid edge");
+                const auto saved=calculator.saveZip(48,32,144,QUrl::fromLocalFile(output+QString("/mode-%1.zip").arg(mode)),16,1299,options);
+                QFile zip(saved.value("path").toString());
+                require(saved.value("ok").toBool() && zip.open(QIODevice::ReadOnly) && zip.readAll().contains(xml),
+                        "fitted ZIP differs from installation");
+            }
+            for(int cols : {8,12,16,20}) for(int maxWidth : {603,900,1305,1678}) {
+                const auto baseline=calculator.layout(48,32,144,cols,maxWidth);
+                require(baseline.value("queueX").toInt()+baseline.value("queueCols").toInt()*75==394,
+                        "crafting queue extends beyond crafting list");
+                require(13+baseline.value("queueRows").toInt()*75<=baseline.value("queueHeight").toInt(),
+                        "queue window does not contain queue rows");
+                for(int mode : {0,1,2}) {
+                    const auto fit=calculator.autoLayout(48,32,144,cols,maxWidth,mode,baseline,48);
+                    require(fit.value("valid").toBool(),"range edge fit failed");
+                    require(fit.value("width").toInt()==fit.value("cols").toInt()*fit.value("cell").toInt()+19,
+                            "fitted right edge contains extra gutter");
+                    if(mode<2) require(fit.value("height").toInt()==fit.value("viewportHeight").toInt()+52,
+                                       "fitted bottom edge contains extra margin");
+                }
+            }
+            auto click=[&](const char *name) {
+                auto *control=item(name); const QPoint point=control->mapToScene(QPointF(control->width()/2,control->height()/2)).toPoint();
+                QTest::mouseClick(window,Qt::LeftButton,Qt::NoModifier,point); settle();
+            };
+            auto popup=window->findChild<QObject *>("edgeFitDialog"); require(popup,"fit dialog missing");
+            item("backpackInput")->setProperty("text","144"); columns->setProperty("value",16); width->setProperty("value",1305);
+            capture("10-before-fit");
+            click("autoFitButton"); require(popup->property("visible").toBool(),"Auto fit does not open options");
+            capture("11-options-chinese");
+            auto *normal=item("normalEdgeOption");
+            auto *explanation=item("edgeExplanationPanel");
+            const QPointF explanationPosition=explanation->mapToScene(QPointF());
+            const QSizeF explanationSize=explanation->size();
+            for(int repeat=0;repeat<3;++repeat) for(const char *name : {"normalEdgeOption","strongEdgeOption","keepHeightOption"}) {
+                auto *option=item(name);
+                QTest::mouseMove(window,option->mapToScene(QPointF(option->width()/2,option->height()/2)).toPoint()); QTest::qWait(40);
+                auto *background=option->property("background").value<QQuickItem *>(); require(background,"radio background missing");
+                const QColor color=background->property("color").value<QColor>();
+                require(color.red()>220 && color.green()>230,"hover background interpolates through dark colours");
+                require(explanation->mapToScene(QPointF())==explanationPosition && explanation->size()==explanationSize,
+                        "explanation moves or resizes on hover");
+            }
+            auto *strong=item("strongEdgeOption");
+            QTest::mouseMove(window,strong->mapToScene(QPointF(strong->width()/2,strong->height()/2)).toPoint()); QTest::qWait(220);
+            require(item("edgeExplanationText")->property("text").toString().contains(QStringLiteral("收掉")),
+                    "hover explanation did not update");
+            require(!window->findChild<QObject *>("normalEdgeTooltip"),"floating dark tooltip remains");
+            capture("12-fixed-hover-explanation");
+            click("edgeFitConfirmButton");
+            require(window->property("columns").toInt()==16 && grid->property("cellWidth").toInt()==80,
+                    "UI fitting changes selected layout"); capture("13-normal");
+            click("autoFitButton"); click("strongEdgeOption");
+            require(!item("normalEdgeOption")->property("checked").toBool(),"radio options are not exclusive");
+            click("edgeFitConfirmButton"); require(grid->height()==240 && inventory->height()==292,"strong UI fit did not remove empty rows");
+            auto *scrollbar=item("inventoryScrollBar");
+            auto *thumb=scrollbar->property("contentItem").value<QQuickItem *>();
+            require(scrollbar->isVisible() && thumb && thumb->opacity()>0 && scrollbar->property("size").toReal()>=1,
+                    "scrollbar disappears when all slots fit");
+            capture("14-strong");
+            preview->setProperty("physicalEnabled",true); settle();
+            require(preview->property("totalSlots").toInt()==192 && grid->property("contentHeight").toReal()>grid->height(),
+                    "strong fit prevents additional backpack slots");
+            require(scrollbar->isVisible() && scrollbar->property("size").toReal()<1,"overflow scrollbar not visible");
+            preview->setProperty("physicalEnabled",false);
+            width->setProperty("value",1305); settle(); const qreal previousHeight=inventory->height();
+            click("autoFitButton"); click("keepHeightOption"); click("edgeFitConfirmButton");
+            require(inventory->height()==previousHeight,"keep-height mode changes height"); capture("15-keep-height");
+            localization.setLanguage("en_US"); click("autoFitButton"); capture("16-options-english");
+            click("edgeFitCancelButton");
+            require(warnings==0,"QML warnings in edge fitting");
+            QFile report(output+"/v141-check.json"); require(report.open(QIODevice::WriteOnly),"report missing");
+            report.write(QJsonDocument(QJsonObject{{"passed",true},{"normalRetainsWholeBlankRows",true},
+                {"strongRemovesBlankRows",true},{"keepHeightPreserved",true},{"queueRightEdge",394},
+                {"capacityAndSkillsPreserved",true},{"exportAndInstallMatch",true},
+                {"persistentScrollbar",true},{"stableHoverExplanation",true},{"qmlWarnings",warnings}}).toJson());
+            return 0;
+        }
         if (args.contains("--whole-rows")) {
             for (int cols : {8,12,20}) for (int maxWidth : {603,858,1678}) {
                 columns->setProperty("value",cols); width->setProperty("value",maxWidth);
@@ -160,36 +276,6 @@ int main(int argc, char **argv) {
         if (args.contains("--alignment")) {
             localization.setLanguage("en_US"); capture("02-english");
             window->resize(760,520); capture("03-english-small");
-            return 0;
-        }
-        if (args.contains("--auto-fit")) {
-            // Check real button clicks against the original automatic-layout
-            // examples, starting with deliberately different slider settings.
-            const int examples[][3]={{48,8,603},{50,10,771},{200,20,1668},{250,18,1485}};
-            for (const auto &example : examples) {
-                item("capacityInput")->setProperty("text",QString::number(example[0]));
-                columns->setProperty("value",20); width->setProperty("value",1678); settle();
-                auto *button=item("autoFitButton");
-                const QPoint point=button->mapToScene(QPointF(button->width()/2,button->height()/2)).toPoint();
-                QTest::mouseClick(window,Qt::LeftButton,Qt::NoModifier,point); settle();
-                require(window->property("columns").toInt()==example[1]
-                        && window->property("maxBackpackWidth").toInt()==example[2],
-                        "auto fit did not restore the original layout and synchronize both sliders");
-                require(inventory->width()==example[2],"auto fit preview disagrees with slider width");
-            }
-            for (const char *name : {"detailsButton","autoFitButton","browseGameButton","scanGameButton"})
-                require(item(name)->height()==34,"action buttons have inconsistent heights");
-            require(!calculator.autoLayout(0,0,48).value("valid").toBool(),"invalid auto fit accepted");
-            item("capacityInput")->setProperty("text",""); settle();
-            require(!item("autoFitButton")->isEnabled(),"auto fit enabled with invalid input");
-            item("capacityInput")->setProperty("text","48");
-            columns->setProperty("value",8); width->setProperty("value",603);
-            capture("02-auto-fit-chinese");
-            localization.setLanguage("en_US"); capture("03-auto-fit-english");
-            require(warnings==0,"QML warnings while using auto fit");
-            QFile report(output+"/auto-fit-check.json"); require(report.open(QIODevice::WriteOnly),"cannot save auto fit report");
-            report.write(QJsonDocument(QJsonObject{{"passed",true},{"originalAlgorithmRestored",true},
-                         {"slidersSynchronized",true},{"buttonHeight",34},{"qmlWarnings",warnings}}).toJson());
             return 0;
         }
         if (args.contains("--snapshot-only")) return 0;
@@ -343,7 +429,9 @@ int main(int argc, char **argv) {
             findItem("capacityInput")->setProperty("text","200");
             findItem("freeInput")->setProperty("text","50");
             findItem("backpackInput")->setProperty("text","200");
-            QMetaObject::invokeMethod(findItem("autoFitButton"),"clicked");
+            findItem("columnsSlider")->setProperty("value",20);
+            findItem("widthSlider")->setProperty("value",1678);
+            QMetaObject::invokeMethod(window,"applyEdgeFit",Q_ARG(QVariant,0));
             preview->setProperty("physicalEnabled",true);
             preview->setProperty("perkEnabled",true);
             preview->setProperty("perkLevel",3);

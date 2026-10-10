@@ -27,6 +27,13 @@ ApplicationWindow {
     readonly property int columns: Math.round(columnsSetting.value)
     readonly property int maxBackpackWidth: Math.round(widthSetting.value)
     readonly property int compactActionHeight: 34
+    property var appliedAppearance: ({})
+    property bool applyingEdgeFit: false
+    function resetEdgeFit() {
+        if (!applyingEdgeFit) appliedAppearance = ({})
+    }
+    onColumnsChanged: resetEdgeFit()
+    onMaxBackpackWidthChanged: resetEdgeFit()
     property bool inputsValid: capacityInput.text.length > 0 && freeInput.text.length > 0
                                && Number.isInteger(Number(capacityInput.text))
                                && Number.isInteger(Number(freeInput.text))
@@ -36,8 +43,18 @@ ApplicationWindow {
                                && freeSlots >= 0 && freeSlots <= capacity
                                && backpackCapacity >= 0 && backpackCapacity <= 5000
     property var currentLayout: inputsValid ? backpackGenerator.layout(capacity, freeSlots, backpackCapacity,
-                                                                       columns, maxBackpackWidth) : ({"valid": false})
+                                                                       columns, maxBackpackWidth, appliedAppearance) : ({"valid": false})
     property bool scanNoticePending: false
+    function applyEdgeFit(mode) {
+        if (!inputsValid) return
+        const result = backpackGenerator.autoLayout(capacity, freeSlots, backpackCapacity, columns,
+            maxBackpackWidth, mode, currentLayout, previewStage.characterEnabled ? previewStage.totalSlots : capacity)
+        if (!result.valid) return
+        applyingEdgeFit = true
+        widthSetting.value = result.maxWidth
+        appliedAppearance = result.appearance
+        applyingEdgeFit = false
+    }
 
     function t(key) {
         const value = localization.strings[key]
@@ -75,7 +92,7 @@ ApplicationWindow {
         nameFilters: [window.t("zipFilter")]
         onAccepted: {
             const result = backpackGenerator.saveZip(window.capacity, window.freeSlots, window.backpackCapacity,
-                                                       selectedFile, window.columns, window.maxBackpackWidth)
+                                                       selectedFile, window.columns, window.maxBackpackWidth, window.appliedAppearance)
             window.showNotice(window.tf(result.ok ? "statusSaved" : "statusGenerateFailed",
                                         [result.ok ? result.path : window.tf(result.messageKey, result.messageArgs)]),
                               !result.ok)
@@ -318,6 +335,14 @@ ApplicationWindow {
         }
     }
 
+    EdgeFitDialog {
+        id: edgeFitDialog
+        objectName: "edgeFitDialog"
+        anchors.centerIn: Overlay.overlay
+        host: window
+        onApplyRequested: function(mode) { window.applyEdgeFit(mode) }
+    }
+
     DataDetailsDialog {
         id: detailsDialog
         objectName: "detailsDialog"
@@ -544,14 +569,7 @@ ApplicationWindow {
                                         text: window.t("autoFit")
                                         buttonStyle: "accent"
                                         enabled: window.inputsValid
-                                        onClicked: {
-                                            const result = backpackGenerator.autoLayout(
-                                                window.capacity, window.freeSlots, window.backpackCapacity)
-                                            if (result.valid) {
-                                                columnsSetting.value = result.cols
-                                                widthSetting.value = result.maxWidth
-                                            }
-                                        }
+                                        onClicked: edgeFitDialog.open()
                                     }
                                 }
                             }
@@ -640,7 +658,7 @@ ApplicationWindow {
                                 onClicked: {
                                     const result = backpackGenerator.installMod(
                                         window.capacity, window.freeSlots, window.backpackCapacity, gameManager.selectedGamePath,
-                                        window.columns, window.maxBackpackWidth)
+                                        window.columns, window.maxBackpackWidth, window.appliedAppearance)
                                     window.showNotice(window.tf(result.ok ? "statusInstalled" : "statusInstallFailed",
                                                                 [result.ok ? result.path : window.tf(result.messageKey, result.messageArgs)]),
                                                       !result.ok, result.ok ? result.path : "", gameManager.selectedGamePath)
@@ -741,7 +759,7 @@ ApplicationWindow {
                             onClicked: {
                                 saveDialog.currentFile = backpackGenerator.suggestedFileUrl(
                                     window.capacity, window.freeSlots, window.backpackCapacity,
-                                    window.columns, window.maxBackpackWidth)
+                                    window.columns, window.maxBackpackWidth, window.appliedAppearance)
                                 saveDialog.open()
                             }
                         }

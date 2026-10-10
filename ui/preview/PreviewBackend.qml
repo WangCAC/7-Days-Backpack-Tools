@@ -3,11 +3,11 @@ import QtQuick
 // Only loaded by the development preview. No game files are read or written.
 QtObject {
     property QtObject generator: QtObject {
-        function layout(capacity, freeSlots, backpackCapacity, columns, maxWidth) {
-            return previewCalculator.layout(capacity, freeSlots, backpackCapacity, columns, maxWidth)
+        function layout(capacity, freeSlots, backpackCapacity, columns, maxWidth, appearance) {
+            return previewCalculator.layout(capacity, freeSlots, backpackCapacity, columns, maxWidth, appearance || {})
         }
-        function autoLayout(capacity, freeSlots, backpackCapacity) {
-            return previewCalculator.autoLayout(capacity, freeSlots, backpackCapacity)
+        function autoLayout(capacity, freeSlots, backpackCapacity, columns, maxWidth, mode, currentLayout, displayedCapacity) {
+            return previewCalculator.autoLayout(capacity, freeSlots, backpackCapacity, columns, maxWidth, mode, currentLayout, displayedCapacity)
         }
         function suggestedFileUrl(capacity, freeSlots, backpackCapacity, columns, maxWidth) { return "file:///C:/Preview/backpack.zip" }
         function installMod(capacity, freeSlots, backpackCapacity, gamePath, columns, maxWidth) {

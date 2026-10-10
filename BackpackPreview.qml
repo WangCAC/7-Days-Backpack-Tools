@@ -148,14 +148,14 @@ Rectangle {
                     objectName: "previewGrid"
                     anchors.top: gameHeader.bottom; anchors.left: parent.left
                     anchors.topMargin: 3; anchors.leftMargin: 3
-                    width: root.layoutData.valid ? root.layoutData.cols * root.layoutData.cell + 13 : 0
+                    width: root.layoutData.valid ? root.layoutData.cols * root.layoutData.cell : 0
                     height: root.layoutData.valid ? root.layoutData.viewportHeight : 0
                     cellWidth: root.layoutData.valid ? root.layoutData.cell : 66
                     cellHeight: cellWidth
                     model: root.layoutData.valid ? root.layoutData.cols * root.rows : 0
                     clip: true
                     boundsBehavior: Flickable.StopAtBounds
-                    snapMode: GridView.SnapToRow
+                    snapMode: root.layoutData.edgeMode === 2 ? GridView.NoSnap : GridView.SnapToRow
                     delegate: Rectangle {
                         required property int index
                         width: previewGrid.cellWidth
@@ -188,9 +188,16 @@ Rectangle {
                         }
                     }
                     ScrollBar.vertical: UI.MaterialScrollBar {
+                        objectName: "inventoryScrollBar"
+                        parent: inventoryWindow
+                        x: previewGrid.x + previewGrid.width
+                        y: previewGrid.y
+                        height: previewGrid.height
                         dark: true
-                        width: 10
-                        policy: root.rows * root.layoutData.cell > previewGrid.height ? ScrollBar.AlwaysOn : ScrollBar.AlwaysOff
+                        width: 16; padding: 4
+                        handleColor: "#c3c8c5"
+                        trackColor: "#222728"
+                        policy: ScrollBar.AlwaysOn
                     }
                 }
             }

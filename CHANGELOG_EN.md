@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.4.1 (2026-10-10)
+
+- **Better crafting queue alignment**: The crafting queue now lines up with the crafting panel above it when you adjust backpack width, fixing slots that intruded into the backpack area.
+- **Updated Auto fit**: Fits the edges of your chosen layout to reduce extra gray space along the right and bottom edges. The width slider and preview update together, and both installed and exported mods use the fitted layout.
+- **Three edge-fitting options**: Normal mode trims the edges while keeping complete blank rows. Strong mode also removes extra blank rows for a more compact backpack. You can also keep the current backpack height and fit only the right edge.
+- **An always-visible preview scrollbar**: The scrollbar remains visible even when all slots fit, bringing the preview closer to the in-game backpack interface.
+- **A clearer Auto fit window**: Option details appear in a fixed area below the choices. Hover over an option to read its explanation. Fixed dark flashes when moving between options for a steadier, clearer experience.
+
 ## v1.4.0 (2026-10-08)
 
 - **New backpack layout settings**: Adjust slots per row from 8 to 20 and backpack width from vanilla to widest. Both installed and exported mods use these settings.

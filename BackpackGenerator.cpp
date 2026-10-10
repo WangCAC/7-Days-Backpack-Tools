@@ -32,6 +32,21 @@ bool validInputs(int capacity, int freeSlots, int backpackCapacity, int columns,
            && columns >= 8 && columns <= 20 && maxWidth >= 603 && maxWidth <= 1678;
 }
 
+bool validAppearance(const QVariantMap &appearance, int columns, int maxWidth)
+{
+    if (appearance.isEmpty()) return true;
+    const int mode = appearance.value(QStringLiteral("mode"), -1).toInt();
+    const int cell = appearance.value(QStringLiteral("cell")).toInt();
+    const int viewport = appearance.value(QStringLiteral("viewportHeight")).toInt();
+    const int height = appearance.value(QStringLiteral("height")).toInt();
+    const double scale = appearance.value(QStringLiteral("stackScale")).toDouble();
+    return mode >= 0 && mode <= 2 && cell > 0 && cell <= 207
+           && columns * cell + 19 <= maxWidth && viewport >= cell && height <= 750
+           && scale >= 0.75 && scale <= 1.05
+           && (mode == 2 ? height >= viewport + 52
+                         : viewport % cell == 0 && height == viewport + 52);
+}
+
 struct ZipEntry {
     QString name;
     QByteArray body;
@@ -199,7 +214,7 @@ BackpackGenerator::BackpackGenerator(QObject *parent) : QObject(parent)
 }
 
 BackpackGenerator::Layout BackpackGenerator::calculate(int capacity, int freeSlots, int backpackCapacity,
-                                                       int columns, int maxWidth)
+                                                       int columns, int maxWidth, const QVariantMap &appearance)
 {
     Layout result;
     result.capacity = capacity;
@@ -227,9 +242,14 @@ BackpackGenerator::Layout BackpackGenerator::calculate(int capacity, int freeSlo
     // and scrollbar always fit, including at 20 columns and vanilla width.
     const int gutter = qRound(19.0 + (columns - 8) * 9.0 / 12.0);
     result.cell = (maxWidth - gutter) / columns;
-    result.width = columns * result.cell + gutter;
+    result.edgeMode = appearance.value(QStringLiteral("mode"), -1).toInt();
+    if (result.edgeMode >= 0)
+        result.cell = appearance.value(QStringLiteral("cell")).toInt();
+    result.width = columns * result.cell + (result.edgeMode >= 0 ? 19 : gutter);
     result.interpolation = std::clamp((result.width - 603.0) / (1678.0 - 603.0), 0.0, 1.0);
     result.stackScale = qRound((1.05 + (0.75 - 1.05) * result.interpolation) * 100.0) / 100.0;
+    if (result.edgeMode >= 0)
+        result.stackScale = appearance.value(QStringLiteral("stackScale")).toDouble();
     // Prefer the complete-row height closest to the usual panel height.
     // Allow a small increase so a nearly fitting row is not discarded.
     constexpr double preferredScaledPanelHeight = 480.0;
@@ -241,6 +261,19 @@ BackpackGenerator::Layout BackpackGenerator::calculate(int capacity, int freeSlo
     result.viewportHeight = result.visibleRows * result.cell;
     result.contentHeight = result.viewportHeight + 11;
     result.height = result.contentHeight + 46;
+    if (result.edgeMode >= 0) {
+        result.viewportHeight = appearance.value(QStringLiteral("viewportHeight")).toInt();
+        result.height = appearance.value(QStringLiteral("height")).toInt();
+        result.contentHeight = result.height - 46;
+        result.visibleRows = qMax(1, result.viewportHeight / result.cell);
+    }
+    // Keep queue cells within the 397-pixel crafting list, with a 3-pixel
+    // right inset. A discrete column change must not use an interpolated X.
+    const double queueInterpolation = std::clamp((columns * result.cell + gutter - 603.0) / 1075.0, 0.0, 1.0);
+    result.queueCols = qRound(4.0 + queueInterpolation);
+    result.queueRows = qRound(1.0 + 2.0 * queueInterpolation);
+    result.queueX = 397 - 3 - result.queueCols * 75;
+    result.queueHeight = result.queueRows * 75 + 16;
     // Use the reference mod's 10-column death container and extra 30 slots.
     // Keep its viewport bounded instead of displaying every loot row at once.
     result.lootRows = (result.maxCapacity + 30 + result.lootCols - 1) / result.lootCols;
@@ -270,12 +303,13 @@ BackpackGenerator::Layout BackpackGenerator::calculate(int capacity, int freeSlo
 }
 
 QVariantMap BackpackGenerator::layout(int capacity, int freeSlots, int backpackCapacity,
-                                      int columns, int maxWidth) const
+                                      int columns, int maxWidth, const QVariantMap &appearance) const
 {
-    if (!validInputs(capacity, freeSlots, backpackCapacity, columns, maxWidth))
+    if (!validInputs(capacity, freeSlots, backpackCapacity, columns, maxWidth)
+        || !validAppearance(appearance, columns, maxWidth))
         return {{QStringLiteral("valid"), false}};
 
-    const Layout data = calculate(capacity, freeSlots, backpackCapacity, columns, maxWidth);
+    const Layout data = calculate(capacity, freeSlots, backpackCapacity, columns, maxWidth, appearance);
     QVariantList perk;
     QVariantList perkRank;
     QVariantList configuredPerk;
@@ -320,6 +354,12 @@ QVariantMap BackpackGenerator::layout(int capacity, int freeSlots, int backpackC
             {QStringLiteral("height"), data.height},
             {QStringLiteral("contentHeight"), data.contentHeight},
             {QStringLiteral("viewportHeight"), data.viewportHeight},
+            {QStringLiteral("appearance"), appearance},
+            {QStringLiteral("edgeMode"), data.edgeMode},
+            {QStringLiteral("queueCols"), data.queueCols},
+            {QStringLiteral("queueRows"), data.queueRows},
+            {QStringLiteral("queueX"), data.queueX},
+            {QStringLiteral("queueHeight"), data.queueHeight},
             {QStringLiteral("stackScale"), data.stackScale},
             {QStringLiteral("configuredPerkTotal"), data.extra},
             {QStringLiteral("backpackPerkTotal"), data.perk.last() - data.extra},
@@ -328,35 +368,47 @@ QVariantMap BackpackGenerator::layout(int capacity, int freeSlots, int backpackC
             {QStringLiteral("perkRank"), perkRank}};
 }
 
-QVariantMap BackpackGenerator::autoLayout(int capacity, int freeSlots, int backpackCapacity) const
+QVariantMap BackpackGenerator::autoLayout(int capacity, int freeSlots, int backpackCapacity,
+                                          int columns, int maxWidth, int mode,
+                                          const QVariantMap &currentLayout, int displayedCapacity) const
 {
-    if (!validInputs(capacity, freeSlots, backpackCapacity, 8, 603))
+    if (!validInputs(capacity, freeSlots, backpackCapacity, columns, maxWidth)
+        || mode < 0 || mode > 2 || !currentLayout.value(QStringLiteral("valid")).toBool())
         return {{QStringLiteral("valid"), false}};
+    const int cell = currentLayout.value(QStringLiteral("cell")).toInt();
+    const int currentHeight = currentLayout.value(QStringLiteral("height")).toInt();
+    if (cell < 1 || cell > 207 || currentHeight < cell + 52 || currentHeight > 750)
+        return {{QStringLiteral("valid"), false}};
+    const int availableRows = qMax(1, (currentHeight - 52) / cell);
+    const int displayed = displayedCapacity > 0 ? displayedCapacity : capacity;
+    if (displayed < capacity || displayed > capacity + backpackCapacity)
+        return {{QStringLiteral("valid"), false}};
+    const int rows = mode == 1 ? qMin(availableRows, (displayed + columns - 1) / columns) : availableRows;
+    const int viewport = mode == 2 ? currentLayout.value(QStringLiteral("viewportHeight")).toInt() : rows * cell;
+    const int height = mode == 2 ? currentHeight : viewport + 52;
+    const QVariantMap appearance{{QStringLiteral("mode"), mode}, {QStringLiteral("cell"), cell},
+                                 {QStringLiteral("height"), height}, {QStringLiteral("viewportHeight"), viewport},
+                                 {QStringLiteral("stackScale"), currentLayout.value(QStringLiteral("stackScale"))}};
+    return layout(capacity, freeSlots, backpackCapacity, columns, qBound(603, columns * cell + 19, 1678), appearance);
+}
 
-    // Restore the original automatic layout: prefer fewer unused cells and
-    // about ten rows, breaking ties in favour of the smaller column count.
-    double bestScore = 1e100;
-    int bestColumns = 8;
-    for (int columns = 8; columns <= 20; ++columns) {
-        const int rows = (capacity + columns - 1) / columns;
-        const int unused = columns * rows - capacity;
-        const double score = unused * 1.5 + qAbs(rows - 10) * 2
-                             + (rows < 5 ? (5 - rows) * 2 : 0);
-        if (score < bestScore) {
-            bestScore = score;
-            bestColumns = columns;
-        }
-    }
-    const int cell = qRound(73.0 + (bestColumns - 8) * 9.0 / 12.0);
-    const int width = bestColumns * cell + qRound(19.0 + (bestColumns - 8) * 9.0 / 12.0);
-    return layout(capacity, freeSlots, backpackCapacity, bestColumns, width);
+QString BackpackGenerator::folderName(const Layout &layout)
+{
+    QString name = QStringLiteral("wangcac-%1BigBackpack%2WB-BP%3-C%4-W%5")
+                       .arg(layout.capacity).arg(layout.freeSlots).arg(layout.backpackCapacity)
+                       .arg(layout.cols).arg(layout.maxWidth);
+    if (layout.edgeMode >= 0)
+        name += QStringLiteral("-E%1-H%2-S%3").arg(layout.edgeMode).arg(layout.height).arg(layout.cell);
+    return name;
 }
 
 QUrl BackpackGenerator::suggestedFileUrl(int capacity, int freeSlots, int backpackCapacity,
-                                        int columns, int maxWidth) const
+                                        int columns, int maxWidth, const QVariantMap &appearance) const
 {
-    const QString name = QStringLiteral("wangcac-%1BigBackpack%2WB-BP%3-C%4-W%5.zip")
-                             .arg(capacity).arg(freeSlots).arg(backpackCapacity).arg(columns).arg(maxWidth);
+    if (!validInputs(capacity, freeSlots, backpackCapacity, columns, maxWidth)
+        || !validAppearance(appearance, columns, maxWidth)) return {};
+    const QString name = folderName(calculate(capacity, freeSlots, backpackCapacity, columns, maxWidth, appearance))
+                         + QStringLiteral(".zip");
     QString directory = QStandardPaths::writableLocation(QStandardPaths::DownloadLocation);
     if (directory.isEmpty())
         directory = QStandardPaths::writableLocation(QStandardPaths::HomeLocation);
@@ -430,6 +482,12 @@ QString BackpackGenerator::patchXml(const QString &relativePath, const QString &
         } else if (name == QStringLiteral("xui.xml")) {
             value = QString::number(layout.stackScale, 'f', 2);
         } else if (name == QStringLiteral("windows.xml")
+                   && path.contains(QStringLiteral("window[@name='windowCraftingQueue']"))) {
+            if (path.endsWith(QStringLiteral("/@cols"))) value = QString::number(layout.queueCols);
+            else if (path.endsWith(QStringLiteral("/@rows"))) value = QString::number(layout.queueRows);
+            else if (path.endsWith(QStringLiteral("/@pos")))
+                value = QStringLiteral("%1,-13").arg(layout.queueX);
+        } else if (name == QStringLiteral("windows.xml")
                    && path.contains(QStringLiteral("window[@name='windowBackpack']"))) {
             if (path.endsWith(QStringLiteral("/@width"))
                 && path.contains(QStringLiteral("windowBackpack']/@width")))
@@ -469,6 +527,20 @@ QString BackpackGenerator::patchXml(const QString &relativePath, const QString &
         operation.appendChild(document.createTextNode(value));
     }
     if (name == QStringLiteral("windows.xml")) {
+        const auto setAttribute = [&](const QString &path, const QString &attribute, const QString &value) {
+            QDomElement operation = document.createElement(QStringLiteral("setattribute"));
+            operation.setAttribute(QStringLiteral("xpath"), path);
+            operation.setAttribute(QStringLiteral("name"), attribute);
+            operation.appendChild(document.createTextNode(value));
+            document.documentElement().appendChild(operation);
+        };
+        const QString queue = QStringLiteral("/windows/window[@name='windowCraftingQueue']");
+        setAttribute(queue, QStringLiteral("width"), QStringLiteral("397"));
+        setAttribute(queue, QStringLiteral("height"), QString::number(layout.queueHeight));
+        const QString queueRect = queue + QStringLiteral("/rect[@controller='CraftingQueue']");
+        setAttribute(queueRect, QStringLiteral("pos"), QStringLiteral("0,0"));
+        setAttribute(queueRect, QStringLiteral("width"), QStringLiteral("397"));
+        setAttribute(queueRect, QStringLiteral("height"), QString::number(layout.queueHeight));
         // Use the same complete-row viewport as the preview, rather than the
         // game's inherited padding expression, which can clip a row's border.
         QDomElement viewport = document.createElement(QStringLiteral("setattribute"));
@@ -477,6 +549,17 @@ QString BackpackGenerator::patchXml(const QString &relativePath, const QString &
         viewport.setAttribute(QStringLiteral("name"), QStringLiteral("height"));
         viewport.appendChild(document.createTextNode(QString::number(layout.viewportHeight)));
         document.documentElement().appendChild(viewport);
+        if (layout.edgeMode >= 0) {
+            const QString content = QStringLiteral("/windows/window[@name='windowBackpack']/rect[@name='content']");
+            setAttribute(content + QStringLiteral("/scrollview"), QStringLiteral("width"),
+                         QString::number(layout.cols * layout.cell));
+            setAttribute(content + QStringLiteral("/defaultscrollbar"), QStringLiteral("pos"),
+                         QStringLiteral("%1,-3").arg(layout.cols * layout.cell + 3));
+            setAttribute(content + QStringLiteral("/defaultscrollbar"), QStringLiteral("barheight"),
+                         QString::number(layout.viewportHeight));
+            setAttribute(content + QStringLiteral("/defaultscrollbar"), QStringLiteral("thumbheight"),
+                         QString::number(qMax(1, layout.viewportHeight - 8)));
+        }
     }
     return document.toString(2);
 }
@@ -487,7 +570,7 @@ QString BackpackGenerator::modInfo(const Layout &layout, const QString &folder) 
                           "<xml>\n"
                           "  <Name value=\"%1\" />\n"
                           "  <DisplayName value=\"%2格人物背包，初始免负重%3格，实体背包最大%4格\" />\n"
-                          "  <Version value=\"1.4.0\" />\n"
+                          "  <Version value=\"1.4.1\" />\n"
                           "  <Description value=\"打破背包模组的频繁更换\" />\n"
                           "  <Author value=\"wangcac制作\" />\n"
                           "  <Website value=\"QQ1843608878\" />\n"
@@ -496,18 +579,18 @@ QString BackpackGenerator::modInfo(const Layout &layout, const QString &folder) 
 }
 
 QVariantMap BackpackGenerator::saveZip(int capacity, int freeSlots, int backpackCapacity, const QUrl &destination,
-                                       int columns, int maxWidth) const
+                                       int columns, int maxWidth, const QVariantMap &appearance) const
 {
-    if (!validInputs(capacity, freeSlots, backpackCapacity, columns, maxWidth))
+    if (!validInputs(capacity, freeSlots, backpackCapacity, columns, maxWidth)
+        || !validAppearance(appearance, columns, maxWidth))
         return failure(QStringLiteral("errorInvalidInput"));
     if (!m_loadError.isEmpty())
         return failure(m_loadError, m_loadErrorArgs);
     if (!destination.isLocalFile())
         return failure(QStringLiteral("errorLocalSave"));
 
-    const Layout data = calculate(capacity, freeSlots, backpackCapacity, columns, maxWidth);
-    const QString folder = QStringLiteral("wangcac-%1BigBackpack%2WB-BP%3-C%4-W%5")
-                               .arg(capacity).arg(freeSlots).arg(backpackCapacity).arg(columns).arg(maxWidth);
+    const Layout data = calculate(capacity, freeSlots, backpackCapacity, columns, maxWidth, appearance);
+    const QString folder = folderName(data);
     QList<ZipEntry> entries;
     entries.append({folder + QStringLiteral("/ModInfo.xml"), modInfo(data, folder).toUtf8()});
     for (auto it = m_files.constBegin(); it != m_files.constEnd(); ++it) {
@@ -531,9 +614,11 @@ QVariantMap BackpackGenerator::saveZip(int capacity, int freeSlots, int backpack
 }
 
 QVariantMap BackpackGenerator::installMod(int capacity, int freeSlots, int backpackCapacity,
-                                          const QString &gameProgramPath, int columns, int maxWidth) const
+                                          const QString &gameProgramPath, int columns, int maxWidth,
+                                          const QVariantMap &appearance) const
 {
-    if (!validInputs(capacity, freeSlots, backpackCapacity, columns, maxWidth))
+    if (!validInputs(capacity, freeSlots, backpackCapacity, columns, maxWidth)
+        || !validAppearance(appearance, columns, maxWidth))
         return failure(QStringLiteral("errorInvalidInput"));
     if (!m_loadError.isEmpty())
         return failure(m_loadError, m_loadErrorArgs);
@@ -543,9 +628,8 @@ QVariantMap BackpackGenerator::installMod(int capacity, int freeSlots, int backp
         || program.fileName().compare(QStringLiteral("7DaysToDie.exe"), Qt::CaseInsensitive) != 0)
         return failure(QStringLiteral("errorChooseGame"));
 
-    const Layout data = calculate(capacity, freeSlots, backpackCapacity, columns, maxWidth);
-    const QString folder = QStringLiteral("wangcac-%1BigBackpack%2WB-BP%3-C%4-W%5")
-                               .arg(capacity).arg(freeSlots).arg(backpackCapacity).arg(columns).arg(maxWidth);
+    const Layout data = calculate(capacity, freeSlots, backpackCapacity, columns, maxWidth, appearance);
+    const QString folder = folderName(data);
     QList<ZipEntry> files;
     files.append({QStringLiteral("ModInfo.xml"), modInfo(data, folder).toUtf8()});
     for (auto it = m_files.constBegin(); it != m_files.constEnd(); ++it) {
